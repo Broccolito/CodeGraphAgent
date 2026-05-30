@@ -27,6 +27,7 @@ import { luaExtractor } from './lua';
 import { luauExtractor } from './luau';
 import { objcExtractor } from './objc';
 import { rExtractor } from './r';
+import { juliaExtractor } from './julia';
 
 export const EXTRACTORS: Partial<Record<Language, LanguageExtractor>> = {
   typescript: typescriptExtractor,
@@ -51,4 +52,5 @@ export const EXTRACTORS: Partial<Record<Language, LanguageExtractor>> = {
   luau: luauExtractor,
   objc: objcExtractor,
   r: rExtractor,
+  julia: juliaExtractor,
 };

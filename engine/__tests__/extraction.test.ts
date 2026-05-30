@@ -4434,3 +4434,140 @@ lapply(1:10, function(x) x * 2)
     expect(functions).toHaveLength(0);
   });
 });
+
+describe('Julia Extraction', () => {
+  it('should detect Julia files', () => {
+    expect(detectLanguage('analysis.jl')).toBe('julia');
+    expect(detectLanguage('src/utils.jl')).toBe('julia');
+  });
+
+  it('should report Julia as supported', () => {
+    expect(isLanguageSupported('julia')).toBe(true);
+    expect(getSupportedLanguages()).toContain('julia');
+  });
+
+  it('should create a file node for Julia files', () => {
+    const code = `
+function hello(name)
+    "Hello, \${name}"
+end
+`;
+    const result = extractFromSource('hello.jl', code);
+
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+    expect(fileNode?.name).toBe('hello.jl');
+    expect(fileNode?.language).toBe('julia');
+  });
+
+  it('should extract long-form function definitions (function ... end)', () => {
+    const code = `
+function hello(name)
+    "Hello, \${name}"
+end
+
+function greet()
+    hello("world")
+end
+
+function main()
+    println(greet())
+end
+`;
+    const result = extractFromSource('funcs.jl', code);
+
+    const functions = result.nodes.filter((n) => n.kind === 'function');
+    const names = functions.map((f) => f.name).sort();
+    expect(names).toContain('hello');
+    expect(names).toContain('greet');
+    expect(names).toContain('main');
+  });
+
+  it('should extract short-form function definitions (f() = ...)', () => {
+    const code = `
+greet() = hello("world")
+add(a, b) = a + b
+`;
+    const result = extractFromSource('short.jl', code);
+
+    const functions = result.nodes.filter((n) => n.kind === 'function');
+    const names = functions.map((f) => f.name).sort();
+    expect(names).toContain('greet');
+    expect(names).toContain('add');
+  });
+
+  it('should extract call edges from function bodies', () => {
+    const code = `
+function hello(name)
+    "Hello, \${name}"
+end
+
+greet() = hello("world")
+
+function main()
+    println(greet())
+end
+`;
+    const result = extractFromSource('calls.jl', code);
+
+    const calls = result.unresolvedReferences.filter((r) => r.referenceKind === 'calls');
+    const callNames = calls.map((c) => c.referenceName);
+
+    // greet calls hello; main calls println and greet
+    expect(callNames).toContain('hello');
+    expect(callNames).toContain('greet');
+    expect(callNames).toContain('println');
+  });
+
+  it('should extract using statements as imports', () => {
+    const code = `
+using Pkg
+using Statistics: mean, std
+`;
+    const result = extractFromSource('imports.jl', code);
+
+    const imports = result.nodes.filter((n) => n.kind === 'import');
+    const names = imports.map((i) => i.name);
+    expect(names).toContain('Pkg');
+    expect(names).toContain('Statistics');
+  });
+
+  it('should extract import statements', () => {
+    const code = `
+import Statistics
+import Base: show, print
+`;
+    const result = extractFromSource('imports2.jl', code);
+
+    const imports = result.nodes.filter((n) => n.kind === 'import');
+    const names = imports.map((i) => i.name);
+    expect(names).toContain('Statistics');
+    expect(names).toContain('Base');
+  });
+
+  it('should extract plain variable assignments', () => {
+    const code = `
+x = 42
+name = "Alice"
+`;
+    const result = extractFromSource('vars.jl', code);
+
+    const variables = result.nodes.filter((n) => n.kind === 'variable');
+    const names = variables.map((v) => v.name);
+    expect(names).toContain('x');
+    expect(names).toContain('name');
+  });
+
+  it('should extract const declarations as constants', () => {
+    const code = `
+const PI_VAL = 3.14159
+const MAX_SIZE = 1000
+`;
+    const result = extractFromSource('consts.jl', code);
+
+    const constants = result.nodes.filter((n) => n.kind === 'constant');
+    const names = constants.map((c) => c.name);
+    expect(names).toContain('PI_VAL');
+    expect(names).toContain('MAX_SIZE');
+  });
+});
