@@ -1,16 +1,29 @@
 """CLI entry point for codegraphagent.
 
-This is the [project.scripts] target. It defers the real work to a function
-in this module so that `python -m codegraphagent` and the `codegraphagent`
-command share the same entrypoint.
+Orchestrates the three pieces of the shim:
+  1. paths — resolve the project root and ensure the .biorouter/codegraph
+     state dir + .codegraph symlink exist.
+  2. bootstrap — ensure the vendored engine bundle is downloaded, verified,
+     and extracted.
+  3. proxy — spawn the engine and pump MCP traffic.
+
+If either of the first two fails, hand control to the degraded-mode error
+shim so the agent gets a structured error frame rather than an opaque crash.
 """
+
+from __future__ import annotations
+
+from codegraphagent import bootstrap, error_shim, paths, proxy
+from codegraphagent.errors import CodeGraphAgentError
 
 
 def main() -> int:
-    """Run the CodeGraphAgent MCP server.
+    try:
+        root = paths.resolve_project_root()
+        paths.ensure_layout(root)
+        launcher = bootstrap.ensure_engine()
+    except CodeGraphAgentError as exc:
+        error_shim.serve(exc)
+        return 0
 
-    Returns the process exit code (0 on clean shutdown, non-zero otherwise).
-    Real implementation lands in later tasks; for now this is a stub.
-    """
-    print("codegraphagent: stub — wiring lands in Task E2")
-    return 0
+    return proxy.run(launcher=launcher, cwd=root)
