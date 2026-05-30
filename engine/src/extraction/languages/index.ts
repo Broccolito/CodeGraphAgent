@@ -29,6 +29,7 @@ import { objcExtractor } from './objc';
 import { rExtractor } from './r';
 import { juliaExtractor } from './julia';
 import { matlabExtractor } from './matlab';
+import { perlExtractor } from './perl';
 
 export const EXTRACTORS: Partial<Record<Language, LanguageExtractor>> = {
   typescript: typescriptExtractor,
@@ -55,4 +56,5 @@ export const EXTRACTORS: Partial<Record<Language, LanguageExtractor>> = {
   r: rExtractor,
   julia: juliaExtractor,
   matlab: matlabExtractor,
+  perl: perlExtractor,
 };

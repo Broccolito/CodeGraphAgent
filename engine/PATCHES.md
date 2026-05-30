@@ -37,6 +37,22 @@ Perl — each documented as a numbered entry below when it lands.
   - `macro_definition` has the same structure as `function_definition`
   - Call edges work via the standard `call_expression` in `callTypes`; `visitFunctionBody` recursively finds them
 
+### Perl (added 2026-05-30)
+- WASM grammar: `engine/src/extraction/wasm/tree-sitter-perl.wasm` from tree-sitter-perl/tree-sitter-perl v1.0.2
+- Extension map: `.pl`, `.pm`, `.t` → `perl`
+- Extractor: `engine/src/extraction/languages/perl.ts`
+- Tests: added `Perl Extraction` describe block in `engine/__tests__/extraction.test.ts` (10 tests)
+- Notes: Perl grammar (tree-sitter-perl v1.0.2) key AST facts confirmed empirically:
+  - `subroutine_declaration_statement`: namedChild[0]=`bareword` (name), namedChild[1]=`block` (body); no named fields
+  - `function_call_expression`: child[0] has type `function` (callee); no named fields
+  - `ambiguous_function_call_expression`: like function_call_expression but wraps e.g. `print foo()`; child[0] type=`function`
+  - `method_call_expression`: `$obj->method()` or `Class->method()`; child[2] type=`method` (method name)
+  - `use_statement`: namedChild[0] is a `package` node holding the module name
+  - `require_expression`: namedChild[0] is a `bareword` holding the module name
+  - `package_statement`: namedChild[0] is a `package` node holding the package name (re-uses `package` type for both the keyword and the identifier)
+  - The grammar does NOT use named fields (childForFieldName returns null); all extraction uses `namedChild(i)` or `child(i)` by index
+  - `resolveName` hook is used to extract callee names from all three call node types
+
 ### MATLAB (added 2026-05-30)
 - WASM grammar: `engine/src/extraction/wasm/tree-sitter-matlab.wasm` built locally from acristoffers/tree-sitter-matlab (upstream ships only Python wheels)
 - Extension map: `.m` is shared with Objective-C; disambiguated by `detectLanguage(filePath, content)` content heuristic that checks for ObjC markers (`@interface`, `@implementation`, `#import`, `#include`) in the first 4 KB. `EXTENSION_MAP` still maps `.m` → `objc` as the default; the heuristic overrides to `matlab` only when no ObjC markers are found.

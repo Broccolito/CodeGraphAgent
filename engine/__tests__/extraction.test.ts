@@ -4729,3 +4729,205 @@ y = 42;
     expect(names).toContain('y');
   });
 });
+
+describe('Perl Extraction', () => {
+  // ── Language detection ────────────────────────────────────────────────────
+  it('should detect Perl files by extension', () => {
+    expect(detectLanguage('script.pl')).toBe('perl');
+    expect(detectLanguage('MyModule.pm')).toBe('perl');
+    expect(detectLanguage('foo.t')).toBe('perl');
+    expect(detectLanguage('src/lib/Utils.pm')).toBe('perl');
+  });
+
+  it('should report Perl as supported', () => {
+    expect(isLanguageSupported('perl')).toBe(true);
+    expect(getSupportedLanguages()).toContain('perl');
+  });
+
+  // ── File node ─────────────────────────────────────────────────────────────
+  it('should create a file node for Perl files', () => {
+    const code = `
+package MyPackage;
+
+sub hello {
+    my ($name) = @_;
+    return "Hello";
+}
+
+1;
+`;
+    const result = extractFromSource('MyPackage.pm', code);
+
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+    expect(fileNode?.name).toBe('MyPackage.pm');
+    expect(fileNode?.language).toBe('perl');
+  });
+
+  // ── Function (sub) extraction ─────────────────────────────────────────────
+  it('should extract named subroutines', () => {
+    const code = `
+package MyPackage;
+
+sub hello {
+    my ($name) = @_;
+    return "Hello";
+}
+
+sub greet {
+    return hello("world");
+}
+
+sub main {
+    print greet();
+}
+
+1;
+`;
+    const result = extractFromSource('script.pl', code);
+
+    const functions = result.nodes.filter((n) => n.kind === 'function');
+    const names = functions.map((f) => f.name).sort();
+    expect(names).toContain('hello');
+    expect(names).toContain('greet');
+    expect(names).toContain('main');
+    expect(functions[0].language).toBe('perl');
+  });
+
+  it('should include sub name in function signature', () => {
+    const code = `
+sub hello {
+    return "hi";
+}
+`;
+    const result = extractFromSource('hello.pl', code);
+
+    const funcNode = result.nodes.find((n) => n.kind === 'function');
+    expect(funcNode).toBeDefined();
+    expect(funcNode?.name).toBe('hello');
+    expect(funcNode?.signature).toContain('hello');
+  });
+
+  // ── Call edges ────────────────────────────────────────────────────────────
+  it('should extract function call edges', () => {
+    const code = `
+sub hello {
+    return "Hello";
+}
+
+sub greet {
+    return hello("world");
+}
+
+sub main {
+    print greet();
+}
+`;
+    const result = extractFromSource('calls.pl', code);
+
+    const calls = result.unresolvedReferences.filter((r) => r.referenceKind === 'calls');
+    const callNames = calls.map((c) => c.referenceName);
+    expect(callNames).toContain('hello');
+    expect(callNames).toContain('greet');
+  });
+
+  // ── Package declaration ───────────────────────────────────────────────────
+  it('should extract package declaration as a module node', () => {
+    const code = `
+package MyPackage;
+
+sub hello { return "hi"; }
+
+1;
+`;
+    const result = extractFromSource('MyPackage.pm', code);
+
+    const modules = result.nodes.filter((n) => n.kind === 'module');
+    expect(modules).toHaveLength(1);
+    expect(modules[0].name).toBe('MyPackage');
+    expect(modules[0].language).toBe('perl');
+  });
+
+  // ── use/require imports ───────────────────────────────────────────────────
+  it('should extract use statements as import nodes', () => {
+    const code = `
+use strict;
+use warnings;
+use MyModule qw(foo bar);
+`;
+    const result = extractFromSource('script.pl', code);
+
+    const imports = result.nodes.filter((n) => n.kind === 'import');
+    const names = imports.map((i) => i.name);
+    expect(names).toContain('strict');
+    expect(names).toContain('warnings');
+    expect(names).toContain('MyModule');
+  });
+
+  it('should extract require expressions as import nodes', () => {
+    const code = `
+require AnotherModule;
+require 'some_file.pl';
+`;
+    const result = extractFromSource('script.pl', code);
+
+    const imports = result.nodes.filter((n) => n.kind === 'import');
+    const names = imports.map((i) => i.name);
+    expect(names).toContain('AnotherModule');
+  });
+
+  // ── Full file extraction ──────────────────────────────────────────────────
+  it('should extract a complete Perl module correctly', () => {
+    const code = `
+package MyPackage;
+
+use strict;
+use warnings;
+use MyModule qw(foo bar);
+require AnotherModule;
+
+sub hello {
+    my ($name) = @_;
+    return "Hello";
+}
+
+sub greet {
+    return hello("world");
+}
+
+sub main {
+    print greet();
+}
+
+1;
+`;
+    const result = extractFromSource('MyPackage.pm', code);
+
+    // File node
+    expect(result.nodes.find((n) => n.kind === 'file')).toBeDefined();
+
+    // Package → module node
+    const modules = result.nodes.filter((n) => n.kind === 'module');
+    expect(modules.map((m) => m.name)).toContain('MyPackage');
+
+    // Subs → function nodes
+    const functions = result.nodes.filter((n) => n.kind === 'function');
+    const funcNames = functions.map((f) => f.name);
+    expect(funcNames).toContain('hello');
+    expect(funcNames).toContain('greet');
+    expect(funcNames).toContain('main');
+
+    // use/require → import nodes
+    const imports = result.nodes.filter((n) => n.kind === 'import');
+    const importNames = imports.map((i) => i.name);
+    expect(importNames).toContain('strict');
+    expect(importNames).toContain('MyModule');
+    expect(importNames).toContain('AnotherModule');
+
+    // Call edges
+    const calls = result.unresolvedReferences.filter((r) => r.referenceKind === 'calls');
+    const callNames = calls.map((c) => c.referenceName);
+    expect(callNames).toContain('hello');
+    expect(callNames).toContain('greet');
+  });
+});

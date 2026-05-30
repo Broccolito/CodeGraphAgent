@@ -91,6 +91,7 @@ export const LANGUAGES = [
   'r',
   'julia',
   'matlab',
+  'perl',
   'yaml',
   'twig',
   'xml',
