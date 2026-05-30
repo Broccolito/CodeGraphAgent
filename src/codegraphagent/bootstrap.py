@@ -178,9 +178,15 @@ def _install_dir() -> Path:
 
 
 def _launcher_path(install_dir: Path) -> Path:
-    """Return the platform-correct launcher path inside an extracted bundle."""
-    name = "codegraph.cmd" if platform_tag().startswith("win32") else "codegraph"
-    return install_dir / "bin" / name
+    """Return the platform-correct launcher path inside an extracted bundle.
+
+    The tarball extracts with a top-level directory named after the platform
+    (e.g. ``codegraph-darwin-arm64/``), so the actual launcher sits at
+    ``<install_dir>/codegraph-<tag>/bin/codegraph``.
+    """
+    tag = platform_tag()
+    name = "codegraph.cmd" if tag.startswith("win32") else "codegraph"
+    return install_dir / f"codegraph-{tag}" / "bin" / name
 
 
 def ensure_engine() -> Path:
