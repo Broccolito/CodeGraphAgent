@@ -6,6 +6,8 @@ trace) via a vendored fork of [CodeGraph](https://github.com/colbymchenry/codegr
 
 ## What it does
 
+**New in v0.1.0:** Adds R, Julia, MATLAB, and Perl language support on top of upstream's 19 languages.
+
 CodeGraphAgent installs into a BioRouter session and exposes 10 MCP tools
 (`codegraph_search`, `codegraph_callers`, `codegraph_callees`,
 `codegraph_trace`, `codegraph_impact`, `codegraph_node`, `codegraph_explore`,

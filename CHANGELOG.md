@@ -1,6 +1,13 @@
 # Changelog
 
-## v0.1.0-rc1 (in progress)
+## v0.1.0 (in progress)
+
+- Added 4 new language extractors via Plan 2: R, Julia, MATLAB, Perl.
+- Engine bumped to `engine-v0.2.0` (vendored from upstream v0.9.7 with bio-language patches).
+- `.m` extension now content-disambiguated between MATLAB and Objective-C.
+- 31 new engine tests covering the new languages (1123 total passing).
+
+## v0.1.0-rc1 (2026-05-30)
 
 - Initial release scaffolding.
 - Python proxy shim (paths, bootstrap, proxy, error shim).
