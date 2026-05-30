@@ -1,0 +1,36 @@
+name: Release .brxt
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: ".brxt release tag (e.g. v0.1.0-rc1)"
+        required: true
+
+jobs:
+  release:
+    name: Build and publish .brxt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify release_manifest.json has no placeholder SHAs
+        run: |
+          if grep -q "PLACEHOLDER_FILLED_AT_RELEASE" src/codegraphagent/release_manifest.json; then
+            echo "::error::release_manifest.json still contains PLACEHOLDER_FILLED_AT_RELEASE values."
+            echo "Run Task L2 to update SHAs before releasing the .brxt."
+            exit 1
+          fi
+      - name: Build .brxt
+        run: bash scripts/build-brxt.sh
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ inputs.release_tag }}" \
+            --title "CodeGraphAgent ${{ inputs.release_tag }}" \
+            --notes-file CHANGELOG.md \
+            codegraphagent.brxt
