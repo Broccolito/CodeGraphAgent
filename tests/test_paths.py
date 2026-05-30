@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from codegraphagent import paths
+from codegraphagent.errors import LayoutConflictError
 
 
 def test_resolve_project_root_uses_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -51,3 +52,19 @@ def test_ensure_layout_is_idempotent(tmp_project: Path):
     paths.ensure_layout(tmp_project)
     link = tmp_project / ".codegraph"
     assert link.is_symlink()
+
+
+def test_ensure_layout_raises_on_real_codegraph_dir(tmp_project: Path):
+    (tmp_project / ".codegraph").mkdir()
+    with pytest.raises(LayoutConflictError) as excinfo:
+        paths.ensure_layout(tmp_project)
+    assert excinfo.value.path == str(tmp_project / ".codegraph")
+
+
+def test_ensure_layout_leaves_existing_symlink_alone(tmp_project: Path):
+    paths.ensure_layout(tmp_project)
+    link = tmp_project / ".codegraph"
+    mtime_before = link.lstat().st_mtime
+    paths.ensure_layout(tmp_project)
+    mtime_after = link.lstat().st_mtime
+    assert mtime_before == mtime_after
