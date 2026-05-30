@@ -188,7 +188,7 @@ def test_ensure_engine_honors_engine_path_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     bundle = tmp_path / "user-bundle"
-    bin_dir = bundle / "bin"
+    bin_dir = bundle / "codegraph-linux-x64" / "bin"
     bin_dir.mkdir(parents=True)
     launcher = bin_dir / "codegraph"
     launcher.write_text("#!/bin/sh\n")
@@ -208,8 +208,8 @@ def test_ensure_engine_uses_cached_bundle_with_matching_version(
     monkeypatch.setattr(bootstrap, "_install_dir", lambda: tmp_path / "engine")
 
     install = tmp_path / "engine"
-    (install / "bin").mkdir(parents=True)
-    launcher = install / "bin" / "codegraph"
+    (install / "codegraph-linux-x64" / "bin").mkdir(parents=True)
+    launcher = install / "codegraph-linux-x64" / "bin" / "codegraph"
     launcher.write_text("#!/bin/sh\n")
     launcher.chmod(0o755)
     (install / "VERSION").write_text("0.1.0\n")
