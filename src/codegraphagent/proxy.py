@@ -22,14 +22,22 @@ _PUMP_CHUNK = 64 * 1024
 def _pump(src: BinaryIO, dst: BinaryIO, *, close_dst_on_eof: bool = False) -> None:
     """Copy bytes from src to dst until src is closed/EOF.
 
+    Uses ``read1`` (not ``read``) so partial reads forward immediately. For a
+    BufferedReader backed by a pipe (subprocess stdin/stdout, sys.stdin.buffer),
+    ``read(n)`` blocks until exactly n bytes arrive or EOF — fatal for MCP
+    framing where JSON-RPC frames are hundreds of bytes, far short of the
+    64 KB chunk size. ``read1(n)`` returns whatever the underlying stream has
+    available in one read, which is the correct streaming behavior.
+
     If `close_dst_on_eof` is True, closes dst when src returns EOF — needed for
     the parent_stdin → child_stdin direction so the engine sees EOF and exits
     cleanly when BioRouter closes its end. The child→parent directions leave
     dst open so the parent process can flush other output.
     """
+    read1 = getattr(src, "read1", src.read)
     try:
         while True:
-            chunk = src.read(_PUMP_CHUNK)
+            chunk = read1(_PUMP_CHUNK)
             if not chunk:
                 break
             dst.write(chunk)
