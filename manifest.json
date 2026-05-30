@@ -1,7 +1,7 @@
 {
   "name": "codegraphagent",
   "display_name": "CodeGraphAgent",
-  "description": "Pre-indexed code knowledge graph (callers, callees, impact, trace) via vendored CodeGraph engine. Per-project index stored at <project>/.biorouter/codegraph/.",
+  "description": "Pre-indexed code knowledge graph (callers, callees, impact, trace) via a vendored CodeGraph engine. First use: call codegraphagent_check_engine to download the ~45 MB engine bundle (one-time, takes 30-60s). After that, the codegraph_* tools become available. Per-project index stored at <project>/.biorouter/codegraph/.",
   "version": "0.1.0",
   "entry_point": "codegraphagent",
   "repository": "https://github.com/Broccolito/CodeGraphAgent",
