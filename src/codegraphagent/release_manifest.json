@@ -2,11 +2,29 @@
   "engine_version": "0.2.0",
   "base_url": "https://github.com/Broccolito/CodeGraphAgent/releases/download/engine-v0.2.0/",
   "platforms": {
-    "darwin-arm64":  {"filename": "codegraph-darwin-arm64.tar.gz",  "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
-    "darwin-x64":    {"filename": "codegraph-darwin-x64.tar.gz",    "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
-    "linux-x64":     {"filename": "codegraph-linux-x64.tar.gz",     "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
-    "linux-arm64":   {"filename": "codegraph-linux-arm64.tar.gz",   "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
-    "win32-x64":     {"filename": "codegraph-win32-x64.zip",        "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
-    "win32-arm64":   {"filename": "codegraph-win32-arm64.zip",      "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"}
+    "darwin-arm64": {
+      "filename": "codegraph-darwin-arm64.tar.gz",
+      "sha256": "624db269972a2e43e442861b4c3bfe1c8071d8b447de6b7f4d55613c552c9a7b"
+    },
+    "darwin-x64": {
+      "filename": "codegraph-darwin-x64.tar.gz",
+      "sha256": "abe87c471ac7ef19699ddb891f42e806738163394b68199eb5a3c2792d65bb77"
+    },
+    "linux-x64": {
+      "filename": "codegraph-linux-x64.tar.gz",
+      "sha256": "192fb17598cfe22ec93baedb230481b102dc542ddf33ae635ce7939c64d05009"
+    },
+    "linux-arm64": {
+      "filename": "codegraph-linux-arm64.tar.gz",
+      "sha256": "530d5a19c19706405cc26b2ef93acd3d762b5ef29b34da32f5db64069df4550d"
+    },
+    "win32-x64": {
+      "filename": "codegraph-win32-x64.zip",
+      "sha256": "21b1683f176fad271a51d5528e3d6a6e14197ca702140b1c119f18d4e08ef6b8"
+    },
+    "win32-arm64": {
+      "filename": "codegraph-win32-arm64.zip",
+      "sha256": "9655605e72c08952b2fa3aa0bc1bb99e799603011cb5f9cd94fd0b538043e831"
+    }
   }
 }
