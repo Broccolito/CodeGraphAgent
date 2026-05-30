@@ -16,12 +16,15 @@ OUT="${REPO_ROOT}/codegraphagent.brxt"
 rm -f "$OUT"
 
 # zip preserves directory layout; we just include the files the .brxt format requires.
+# Critically, exclude src/codegraphagent/engine/ — that's the runtime download
+# location populated by bootstrap.ensure_engine(), not part of the .brxt payload.
 zip -r "$OUT" \
   manifest.json \
   README.md \
   pyproject.toml \
   src/codegraphagent \
-  -x '*/__pycache__/*' '*.pyc'
+  -x '*/__pycache__/*' '*.pyc' \
+     'src/codegraphagent/engine/*' 'src/codegraphagent/engine'
 
 echo
 echo "Built: $OUT"
