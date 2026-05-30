@@ -49,3 +49,13 @@ def platform_tag() -> str:
 def archive_suffix() -> str:
     """Return the archive extension for the current platform."""
     return "zip" if platform_tag().startswith("win32") else "tar.gz"
+
+
+def _sha256_of(path: Path) -> str:
+    """Stream a file through SHA-256 in 64KB chunks. Memory-safe for large
+    tarballs (engine bundles are ~50 MB)."""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(64 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()

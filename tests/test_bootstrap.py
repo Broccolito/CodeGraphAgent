@@ -46,3 +46,10 @@ def test_archive_suffix_unix(monkeypatch: pytest.MonkeyPatch):
 def test_archive_suffix_windows(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(bootstrap, "platform_tag", lambda: "win32-x64")
     assert bootstrap.archive_suffix() == "zip"
+
+
+def test_sha256_of_file(tmp_path: Path):
+    payload = b"hello, codegraph"
+    fp = tmp_path / "blob.bin"
+    fp.write_bytes(payload)
+    assert bootstrap._sha256_of(fp) == hashlib.sha256(payload).hexdigest()
