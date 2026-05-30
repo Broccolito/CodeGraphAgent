@@ -1,10 +1,7 @@
 """A fake MCP engine used in proxy tests.
 
-Reads JSON-RPC frames line-by-line from stdin, echoes them back to stdout with
-a `"proxied": true` marker injected. Honors a single `{"method": "shutdown"}`
-frame to exit cleanly.
-
-Run via: `python -m tests.fixtures.fake_engine`.
+- Default mode: echo frames back with `"proxied": true`. Exit 0 on `shutdown`.
+- `--exit-code N` mode: read one frame, then exit with code N.
 """
 
 from __future__ import annotations
@@ -13,7 +10,11 @@ import json
 import sys
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
+    if len(argv) >= 2 and argv[1] == "--exit-code":
+        sys.stdin.readline()
+        return int(argv[2])
+
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -33,4 +34,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv))
