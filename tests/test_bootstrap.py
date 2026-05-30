@@ -182,3 +182,46 @@ def test_extract_replaces_existing_dest(tmp_path: Path):
     bootstrap._extract(archive, dest)
     assert (dest / "NEW").read_text() == "new"
     assert not (dest / "STALE").exists()
+
+
+def test_ensure_engine_honors_engine_path_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    bundle = tmp_path / "user-bundle"
+    bin_dir = bundle / "bin"
+    bin_dir.mkdir(parents=True)
+    launcher = bin_dir / "codegraph"
+    launcher.write_text("#!/bin/sh\n")
+    launcher.chmod(0o755)
+
+    monkeypatch.setenv("CODEGRAPH_ENGINE_PATH", str(bundle))
+    monkeypatch.setattr(bootstrap, "platform_tag", lambda: "linux-x64")
+
+    result = bootstrap.ensure_engine()
+    assert result == launcher
+
+
+def test_ensure_engine_uses_cached_bundle_with_matching_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(bootstrap, "platform_tag", lambda: "linux-x64")
+    monkeypatch.setattr(bootstrap, "_install_dir", lambda: tmp_path / "engine")
+
+    install = tmp_path / "engine"
+    (install / "bin").mkdir(parents=True)
+    launcher = install / "bin" / "codegraph"
+    launcher.write_text("#!/bin/sh\n")
+    launcher.chmod(0o755)
+    (install / "VERSION").write_text("0.1.0\n")
+
+    monkeypatch.setattr(
+        bootstrap, "_load_manifest",
+        lambda: {"engine_version": "0.1.0", "filename": "x", "url": "x", "sha256": "x"},
+    )
+
+    download_called = MagicMock()
+    monkeypatch.setattr(bootstrap, "_download_and_verify", download_called)
+
+    result = bootstrap.ensure_engine()
+    assert result == launcher
+    download_called.assert_not_called()

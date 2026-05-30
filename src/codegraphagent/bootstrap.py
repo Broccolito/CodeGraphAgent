@@ -170,3 +170,62 @@ def _extract(archive: Path, dest: Path) -> None:
             shutil.rmtree(old_dest)
         else:
             staging_path.rename(dest)
+
+
+def _install_dir() -> Path:
+    """Return the per-platform install dir inside the extension package."""
+    return Path(__file__).parent / "engine"
+
+
+def _launcher_path(install_dir: Path) -> Path:
+    """Return the platform-correct launcher path inside an extracted bundle."""
+    name = "codegraph.cmd" if platform_tag().startswith("win32") else "codegraph"
+    return install_dir / "bin" / name
+
+
+def ensure_engine() -> Path:
+    """Ensure the engine bundle is present locally and return its launcher.
+
+    Order of preference:
+    1. $CODEGRAPH_ENGINE_PATH → use as-is (no download, no verification).
+    2. Existing install dir with VERSION matching pinned manifest → reuse.
+    3. Download + verify + extract.
+
+    Raises BootstrapError on any failure.
+    """
+    override = os.environ.get("CODEGRAPH_ENGINE_PATH")
+    if override:
+        return _launcher_path(Path(override))
+
+    manifest = _load_manifest()
+    install = _install_dir()
+    version_file = install / "VERSION"
+    if (
+        install.exists()
+        and version_file.exists()
+        and version_file.read_text().strip() == manifest["engine_version"]
+    ):
+        launcher = _launcher_path(install)
+        if launcher.exists():
+            return launcher
+
+    with tempfile.TemporaryDirectory(prefix=".cga-dl-") as tmp:
+        archive = Path(tmp) / manifest["filename"]
+        _download_and_verify(
+            url=manifest["url"],
+            dest=archive,
+            expected_sha=manifest["sha256"],
+        )
+        _extract(archive, install)
+
+    version_file.write_text(manifest["engine_version"] + "\n")
+    launcher = _launcher_path(install)
+    if not launcher.exists():
+        raise BootstrapError(
+            f"Extracted bundle is missing the launcher at {launcher}. "
+            "The release artifact may be malformed.",
+            url=manifest["url"],
+        )
+    if not launcher.name.endswith(".cmd"):
+        launcher.chmod(0o755)
+    return launcher
