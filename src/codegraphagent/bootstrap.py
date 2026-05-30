@@ -59,3 +59,36 @@ def _sha256_of(path: Path) -> str:
         for chunk in iter(lambda: fh.read(64 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _load_manifest() -> dict:
+    """Load the release manifest and resolve the current-platform info.
+
+    Returns dict with keys: engine_version, filename, url, sha256.
+    """
+    manifest_path = Path(__file__).parent / "release_manifest.json"
+    with manifest_path.open() as fh:
+        manifest = json.load(fh)
+
+    version = os.environ.get("CODEGRAPH_ENGINE_VERSION") or manifest["engine_version"]
+    base_url = manifest["base_url"]
+    if os.environ.get("CODEGRAPH_ENGINE_VERSION"):
+        # Substitute the version in the URL to the override.
+        base_url = (
+            f"https://github.com/Broccolito/CodeGraphAgent/releases/"
+            f"download/engine-v{version}/"
+        )
+
+    tag = platform_tag()
+    if tag not in manifest["platforms"]:
+        raise BootstrapError(
+            f"Manifest does not list a binary for platform {tag}; "
+            f"supported: {sorted(manifest['platforms'])}"
+        )
+    platform_info = manifest["platforms"][tag]
+    return {
+        "engine_version": version,
+        "filename": platform_info["filename"],
+        "url": base_url + platform_info["filename"],
+        "sha256": platform_info["sha256"],
+    }

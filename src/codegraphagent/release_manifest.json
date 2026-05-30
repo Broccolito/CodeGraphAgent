@@ -1,0 +1,12 @@
+{
+  "engine_version": "0.1.0",
+  "base_url": "https://github.com/Broccolito/CodeGraphAgent/releases/download/engine-v0.1.0/",
+  "platforms": {
+    "darwin-arm64":  {"filename": "codegraph-darwin-arm64.tar.gz",  "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
+    "darwin-x64":    {"filename": "codegraph-darwin-x64.tar.gz",    "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
+    "linux-x64":     {"filename": "codegraph-linux-x64.tar.gz",     "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
+    "linux-arm64":   {"filename": "codegraph-linux-arm64.tar.gz",   "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
+    "win32-x64":     {"filename": "codegraph-win32-x64.zip",        "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"},
+    "win32-arm64":   {"filename": "codegraph-win32-arm64.zip",      "sha256": "PLACEHOLDER_FILLED_AT_RELEASE"}
+  }
+}

@@ -53,3 +53,20 @@ def test_sha256_of_file(tmp_path: Path):
     fp = tmp_path / "blob.bin"
     fp.write_bytes(payload)
     assert bootstrap._sha256_of(fp) == hashlib.sha256(payload).hexdigest()
+
+
+def test_load_manifest_returns_pinned_info(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(bootstrap, "platform_tag", lambda: "linux-x64")
+    info = bootstrap._load_manifest()
+    assert "engine_version" in info
+    assert info["filename"] == "codegraph-linux-x64.tar.gz"
+    assert info["url"].endswith("codegraph-linux-x64.tar.gz")
+
+
+def test_load_manifest_respects_engine_version_override(
+    monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(bootstrap, "platform_tag", lambda: "linux-x64")
+    monkeypatch.setenv("CODEGRAPH_ENGINE_VERSION", "0.9.9")
+    info = bootstrap._load_manifest()
+    assert "engine-v0.9.9" in info["url"]
