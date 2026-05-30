@@ -1,0 +1,56 @@
+name: Build engine bundles
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Engine release tag (e.g. engine-v0.1.0)"
+        required: true
+
+jobs:
+  build:
+    name: Build all platform bundles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install engine deps
+        working-directory: engine
+        run: npm ci
+      - name: Build all bundles
+        working-directory: engine
+        run: |
+          for tgt in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64 win32-arm64; do
+            echo "::group::Build $tgt"
+            bash scripts/build-bundle.sh "$tgt"
+            echo "::endgroup::"
+          done
+      - name: Generate SHA256SUMS
+        working-directory: engine/release
+        run: |
+          sha256sum codegraph-*.{tar.gz,zip} 2>/dev/null > SHA256SUMS || \
+            shasum -a 256 codegraph-*.{tar.gz,zip} > SHA256SUMS
+          cat SHA256SUMS
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-bundles
+          path: |
+            engine/release/codegraph-*.tar.gz
+            engine/release/codegraph-*.zip
+            engine/release/SHA256SUMS
+          retention-days: 30
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ inputs.release_tag }}" \
+            --title "Engine ${{ inputs.release_tag }}" \
+            --notes "Auto-built engine bundles from $(git rev-parse --short HEAD)." \
+            --draft \
+            engine/release/codegraph-*.tar.gz \
+            engine/release/codegraph-*.zip \
+            engine/release/SHA256SUMS
