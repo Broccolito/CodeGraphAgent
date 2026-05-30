@@ -4323,3 +4323,114 @@ void helperFunction(int count) {
     expect(getSupportedLanguages()).toContain('objc');
   });
 });
+
+describe('R Extraction', () => {
+  it('should detect R files', () => {
+    expect(detectLanguage('analysis.R')).toBe('r');
+    expect(detectLanguage('utils.r')).toBe('r');
+  });
+
+  it('should report R as supported', () => {
+    expect(isLanguageSupported('r')).toBe(true);
+    expect(getSupportedLanguages()).toContain('r');
+  });
+
+  it('should create a file node for R files', () => {
+    const code = `
+hello <- function(name) {
+  paste0("Hello, ", name)
+}
+`;
+    const result = extractFromSource('hello.R', code);
+
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+    expect(fileNode?.name).toBe('hello.R');
+    expect(fileNode?.language).toBe('r');
+  });
+
+  it('should extract function definitions (left assignment)', () => {
+    const code = `
+hello <- function(name) {
+  paste0("Hello, ", name)
+}
+
+greet <- function() {
+  hello("world")
+}
+
+main <- function() {
+  greet()
+}
+`;
+    const result = extractFromSource('funcs.R', code);
+
+    const functions = result.nodes.filter((n) => n.kind === 'function');
+    const names = functions.map((f) => f.name).sort();
+    expect(names).toContain('hello');
+    expect(names).toContain('greet');
+    expect(names).toContain('main');
+  });
+
+  it('should extract function definitions via equals assignment', () => {
+    const code = `
+add = function(a, b) {
+  a + b
+}
+`;
+    const result = extractFromSource('add.R', code);
+
+    const funcNode = result.nodes.find((n) => n.kind === 'function');
+    expect(funcNode).toBeDefined();
+    expect(funcNode?.name).toBe('add');
+    expect(funcNode?.language).toBe('r');
+  });
+
+  it('should extract function call edges', () => {
+    const code = `
+hello <- function(name) {
+  paste0("Hello, ", name)
+}
+
+greet <- function() {
+  hello("world")
+}
+
+main <- function() {
+  greet()
+}
+`;
+    const result = extractFromSource('funcs.R', code);
+
+    const calls = result.unresolvedReferences.filter((r) => r.referenceKind === 'calls');
+    const callNames = calls.map((c) => c.referenceName);
+
+    // greet calls hello, main calls greet
+    expect(callNames).toContain('hello');
+    expect(callNames).toContain('greet');
+  });
+
+  it('should extract plain variable assignments', () => {
+    const code = `
+x <- 42
+name <- "Alice"
+`;
+    const result = extractFromSource('vars.R', code);
+
+    const variables = result.nodes.filter((n) => n.kind === 'variable');
+    const names = variables.map((v) => v.name);
+    expect(names).toContain('x');
+    expect(names).toContain('name');
+  });
+
+  it('should not extract anonymous functions without assignment', () => {
+    const code = `
+lapply(1:10, function(x) x * 2)
+`;
+    const result = extractFromSource('anon.R', code);
+
+    // The anonymous function passed to lapply has no identifier name
+    const functions = result.nodes.filter((n) => n.kind === 'function');
+    expect(functions).toHaveLength(0);
+  });
+});
