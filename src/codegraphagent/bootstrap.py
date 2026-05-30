@@ -189,6 +189,34 @@ def _launcher_path(install_dir: Path) -> Path:
     return install_dir / f"codegraph-{tag}" / "bin" / name
 
 
+def cached_launcher() -> Path | None:
+    """Return the launcher path if a matching engine is already installed,
+    else None. Read-only — never downloads.
+
+    Order of preference matches ``ensure_engine``:
+    1. ``$CODEGRAPH_ENGINE_PATH`` set → return its launcher path (no version check).
+    2. Local install dir present and ``VERSION`` matches the pinned manifest →
+       return its launcher path.
+    3. Otherwise → None.
+    """
+    override = os.environ.get("CODEGRAPH_ENGINE_PATH")
+    if override:
+        return _launcher_path(Path(override))
+
+    manifest = _load_manifest()
+    install = _install_dir()
+    version_file = install / "VERSION"
+    if (
+        install.exists()
+        and version_file.exists()
+        and version_file.read_text().strip() == manifest["engine_version"]
+    ):
+        launcher = _launcher_path(install)
+        if launcher.exists():
+            return launcher
+    return None
+
+
 def ensure_engine() -> Path:
     """Ensure the engine bundle is present locally and return its launcher.
 

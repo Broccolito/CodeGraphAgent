@@ -225,3 +225,79 @@ def test_ensure_engine_uses_cached_bundle_with_matching_version(
     result = bootstrap.ensure_engine()
     assert result == launcher
     download_called.assert_not_called()
+
+
+def test_cached_launcher_returns_path_when_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Returns the launcher path when engine is cached and VERSION matches manifest."""
+    monkeypatch.setattr(bootstrap, "platform_tag", lambda: "linux-x64")
+    monkeypatch.setattr(bootstrap, "_install_dir", lambda: tmp_path / "engine")
+    monkeypatch.setattr(
+        bootstrap, "_load_manifest",
+        lambda: {"engine_version": "0.1.0", "filename": "x", "url": "x", "sha256": "x"},
+    )
+
+    install = tmp_path / "engine"
+    (install / "codegraph-linux-x64" / "bin").mkdir(parents=True)
+    launcher = install / "codegraph-linux-x64" / "bin" / "codegraph"
+    launcher.write_text("#!/bin/sh\n")
+    launcher.chmod(0o755)
+    (install / "VERSION").write_text("0.1.0\n")
+
+    result = bootstrap.cached_launcher()
+    assert result == launcher
+
+
+def test_cached_launcher_returns_none_when_not_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Returns None when nothing is installed locally."""
+    monkeypatch.setattr(bootstrap, "platform_tag", lambda: "linux-x64")
+    monkeypatch.setattr(bootstrap, "_install_dir", lambda: tmp_path / "engine")
+    monkeypatch.setattr(
+        bootstrap, "_load_manifest",
+        lambda: {"engine_version": "0.1.0", "filename": "x", "url": "x", "sha256": "x"},
+    )
+    monkeypatch.delenv("CODEGRAPH_ENGINE_PATH", raising=False)
+
+    assert bootstrap.cached_launcher() is None
+
+
+def test_cached_launcher_returns_none_when_version_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Returns None when installed VERSION differs from manifest's pinned version."""
+    monkeypatch.setattr(bootstrap, "platform_tag", lambda: "linux-x64")
+    monkeypatch.setattr(bootstrap, "_install_dir", lambda: tmp_path / "engine")
+    monkeypatch.setattr(
+        bootstrap, "_load_manifest",
+        lambda: {"engine_version": "0.2.0", "filename": "x", "url": "x", "sha256": "x"},
+    )
+
+    install = tmp_path / "engine"
+    (install / "codegraph-linux-x64" / "bin").mkdir(parents=True)
+    launcher = install / "codegraph-linux-x64" / "bin" / "codegraph"
+    launcher.write_text("")
+    launcher.chmod(0o755)
+    (install / "VERSION").write_text("0.1.0\n")  # stale version
+
+    assert bootstrap.cached_launcher() is None
+
+
+def test_cached_launcher_honors_engine_path_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """If CODEGRAPH_ENGINE_PATH is set, returns its launcher path (skips version check)."""
+    bundle = tmp_path / "user-bundle"
+    bin_dir = bundle / "codegraph-linux-x64" / "bin"
+    bin_dir.mkdir(parents=True)
+    launcher = bin_dir / "codegraph"
+    launcher.write_text("")
+    launcher.chmod(0o755)
+
+    monkeypatch.setenv("CODEGRAPH_ENGINE_PATH", str(bundle))
+    monkeypatch.setattr(bootstrap, "platform_tag", lambda: "linux-x64")
+
+    result = bootstrap.cached_launcher()
+    assert result == launcher
