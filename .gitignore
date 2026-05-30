@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.eggs/
+dist/
+build/
+*.whl
+
+# uv
+.uv/
+uv.lock.bak
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# CodeGraphAgent build outputs
+codegraphagent.brxt
+*.tar.gz
+*.zip
+
+# Engine build outputs (built locally for testing)
+engine/release/
+engine/node_modules/
+engine/dist/
