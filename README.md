@@ -16,6 +16,10 @@ every query.
 
 The index lives at `<project>/.biorouter/codegraph/codegraph.db`.
 
+Two helper tools are added by the shim:
+- `codegraphagent_check_engine` — installs the engine bundle on first use (one-time).
+- `codegraphagent_index_project` — builds (or rebuilds) the index for the current project. Must be called once before the query tools (codegraph_search, codegraph_callers, etc.) return results.
+
 ## First-time install flow
 
 When you first enable CodeGraphAgent in a session, the engine binary (~45 MB)
@@ -27,6 +31,8 @@ work transparently.
 
 This is intentional: the download is deliberate and visible, rather than
 hidden in a silent stall during MCP initialize.
+
+After the engine is installed, the agent also needs to **index your project** before queries return results. Call `codegraphagent_index_project` (or ask the agent to do it). Indexing takes ~1s for tiny projects, longer for monorepos. The engine refuses search/caller/etc queries until an index exists.
 
 ## Install
 

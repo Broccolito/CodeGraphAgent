@@ -14,3 +14,8 @@
   trigger the download. Subsequent calls return immediately. This replaces
   a silent 30-60s stall during MCP initialize with a visible, deliberate
   tool call.
+- Added `codegraphagent_index_project` MCP tool so agents can build the
+  CodeGraph index from within a BioRouter session (upstream's engine
+  expects `codegraph init` to be run from a terminal first). Proxy is now
+  JSON-RPC-frame-aware to intercept this tool while passing everything
+  else through.
