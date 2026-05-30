@@ -19,7 +19,7 @@ def test_cli_entrypoint_runs(tmp_path, monkeypatch):
     fake_launcher = tmp_path / "fake-launcher"
     fake_launcher.write_text("")
 
-    with patch.object(cli.bootstrap, "ensure_engine", return_value=fake_launcher), \
+    with patch.object(cli.bootstrap, "cached_launcher", return_value=fake_launcher), \
          patch.object(cli.proxy, "run", MagicMock(return_value=0)):
         rc = cli.main()
 
