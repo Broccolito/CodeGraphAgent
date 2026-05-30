@@ -36,3 +36,43 @@ def resolve_project_root() -> Path:
         if any((candidate / marker).exists() for marker in _PROJECT_MARKERS):
             return candidate
     return cwd
+
+
+def ensure_layout(root: Path) -> None:
+    """Ensure `<root>/.biorouter/codegraph/` exists and `<root>/.codegraph` is
+    a symlink pointing at it.
+
+    Idempotent: safe to call repeatedly.
+
+    Raises:
+        LayoutConflictError: if `<root>/.codegraph` exists as a real
+            directory rather than a symlink.
+    """
+    state_dir = root / ".biorouter" / "codegraph"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    link = root / ".codegraph"
+    target = Path(".biorouter") / "codegraph"  # relative for portability
+
+    if link.is_symlink():
+        return  # idempotent — assume it points where we want
+    if link.exists():
+        raise LayoutConflictError(
+            f"{link} exists as a real directory; "
+            "rename or remove it, then restart CodeGraphAgent",
+            path=str(link),
+        )
+
+    if sys.platform == "win32":
+        _create_windows_junction(link, root / target)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+def _create_windows_junction(link: Path, target: Path) -> None:
+    """Create a directory junction on Windows (doesn't need admin)."""
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        check=True,
+        capture_output=True,
+    )
