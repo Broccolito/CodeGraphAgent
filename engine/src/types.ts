@@ -90,6 +90,7 @@ export const LANGUAGES = [
   'objc',
   'r',
   'julia',
+  'matlab',
   'yaml',
   'twig',
   'xml',

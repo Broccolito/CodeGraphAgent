@@ -4571,3 +4571,161 @@ const MAX_SIZE = 1000
     expect(names).toContain('MAX_SIZE');
   });
 });
+
+describe('MATLAB Extraction', () => {
+  // ── Language detection ────────────────────────────────────────────────────
+  it('should detect MATLAB files via content heuristic (no ObjC markers)', () => {
+    // .m with MATLAB content → matlab
+    const matlabContent = `function result = hello(name)\n    result = name;\nend\n`;
+    expect(detectLanguage('hello.m', matlabContent)).toBe('matlab');
+  });
+
+  it('should detect ObjC .m files that have @interface', () => {
+    const objcContent = `@interface Foo : NSObject\n- (void)bar;\n@end\n`;
+    expect(detectLanguage('Foo.m', objcContent)).toBe('objc');
+  });
+
+  it('should detect ObjC .m files that have @implementation', () => {
+    const objcContent = `@implementation Foo\n- (void)bar {}\n@end\n`;
+    expect(detectLanguage('Foo.m', objcContent)).toBe('objc');
+  });
+
+  it('should detect ObjC .m files that have #import', () => {
+    const objcContent = `#import <Foundation/Foundation.h>\n\n@implementation Foo\n@end\n`;
+    expect(detectLanguage('Foo.m', objcContent)).toBe('objc');
+  });
+
+  it('should default to matlab for .m with no ObjC markers (just comments)', () => {
+    const commentOnly = `% This is a MATLAB comment\n% No function defined yet\n`;
+    expect(detectLanguage('script.m', commentOnly)).toBe('matlab');
+  });
+
+  it('should fall back to objc for .m with no content provided', () => {
+    // When source is omitted, EXTENSION_MAP default (objc) is returned
+    expect(detectLanguage('unknown.m')).toBe('objc');
+  });
+
+  it('should report MATLAB as supported', () => {
+    expect(isLanguageSupported('matlab')).toBe(true);
+    expect(getSupportedLanguages()).toContain('matlab');
+  });
+
+  // ── File node ─────────────────────────────────────────────────────────────
+  it('should create a file node for MATLAB files', () => {
+    const code = `
+function result = hello(name)
+    result = ['Hello, ', name];
+end
+`;
+    const result = extractFromSource('hello.m', code);
+
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+    expect(fileNode?.name).toBe('hello.m');
+    expect(fileNode?.language).toBe('matlab');
+  });
+
+  // ── Function extraction ───────────────────────────────────────────────────
+  it('should extract a simple void function (no output)', () => {
+    const code = `
+function greet()
+    disp('hello');
+end
+`;
+    const result = extractFromSource('greet.m', code);
+
+    const functions = result.nodes.filter((n) => n.kind === 'function');
+    expect(functions).toHaveLength(1);
+    expect(functions[0].name).toBe('greet');
+    expect(functions[0].language).toBe('matlab');
+  });
+
+  it('should extract a function with a single return value', () => {
+    const code = `
+function result = hello(name)
+    result = ['Hello, ', name];
+end
+`;
+    const result = extractFromSource('hello.m', code);
+
+    const funcNode = result.nodes.find((n) => n.kind === 'function');
+    expect(funcNode).toBeDefined();
+    expect(funcNode?.name).toBe('hello');
+    expect(funcNode?.signature).toContain('hello');
+  });
+
+  it('should extract a function with multiple return values', () => {
+    const code = `
+function [a, b] = swap(x, y)
+    a = y;
+    b = x;
+end
+`;
+    const result = extractFromSource('swap.m', code);
+
+    const funcNode = result.nodes.find((n) => n.kind === 'function');
+    expect(funcNode).toBeDefined();
+    expect(funcNode?.name).toBe('swap');
+  });
+
+  it('should extract multiple function definitions', () => {
+    const code = `
+function result = hello(name)
+    result = ['Hello, ', name];
+end
+
+function greet()
+    hello('world');
+end
+
+function main()
+    greet();
+end
+`;
+    const result = extractFromSource('funcs.m', code);
+
+    const functions = result.nodes.filter((n) => n.kind === 'function');
+    const names = functions.map((f) => f.name).sort();
+    expect(names).toContain('hello');
+    expect(names).toContain('greet');
+    expect(names).toContain('main');
+  });
+
+  // ── Call edges ────────────────────────────────────────────────────────────
+  it('should extract call edges from function bodies', () => {
+    const code = `
+function result = hello(name)
+    result = ['Hello, ', name];
+end
+
+function greet()
+    hello('world');
+end
+
+function main()
+    greet();
+end
+`;
+    const result = extractFromSource('calls.m', code);
+
+    const calls = result.unresolvedReferences.filter((r) => r.referenceKind === 'calls');
+    const callNames = calls.map((c) => c.referenceName);
+
+    expect(callNames).toContain('hello');
+    expect(callNames).toContain('greet');
+  });
+
+  // ── Variable extraction ───────────────────────────────────────────────────
+  it('should extract top-level variable assignments', () => {
+    const code = `
+x = hello('test');
+y = 42;
+`;
+    const result = extractFromSource('script.m', code);
+
+    const variables = result.nodes.filter((n) => n.kind === 'variable');
+    const names = variables.map((v) => v.name);
+    expect(names).toContain('x');
+    expect(names).toContain('y');
+  });
+});

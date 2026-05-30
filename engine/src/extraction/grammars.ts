@@ -40,6 +40,7 @@ const WASM_GRAMMAR_FILES: Record<GrammarLanguage, string> = {
   objc: 'tree-sitter-objc.wasm',
   r: 'tree-sitter-r.wasm',
   julia: 'tree-sitter-julia.wasm',
+  matlab: 'tree-sitter-matlab.wasm',
 };
 
 /**
@@ -184,7 +185,7 @@ export async function loadGrammarsForLanguages(languages: Language[]): Promise<v
       // ABI-13 build that corrupts the shared WASM heap under web-tree-sitter
       // 0.25 (drops nested calls/imports on every file after the first); we
       // vendor the upstream ABI-15 wasm instead.
-      const wasmPath = (lang === 'pascal' || lang === 'scala' || lang === 'lua' || lang === 'luau' || lang === 'r' || lang === 'julia')
+      const wasmPath = (lang === 'pascal' || lang === 'scala' || lang === 'lua' || lang === 'luau' || lang === 'r' || lang === 'julia' || lang === 'matlab')
         ? path.join(__dirname, 'wasm', wasmFile)
         : require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
       const language = await WasmLanguage.load(wasmPath);
@@ -234,7 +235,15 @@ export function getParser(language: Language): Parser | null {
 }
 
 /**
- * Detect language from file extension
+ * Detect language from file extension, with content-based disambiguation
+ * for ambiguous extensions.
+ *
+ * Currently disambiguates:
+ *   .h  — C vs C++ vs Objective-C (existing behaviour)
+ *   .m  — Objective-C vs MATLAB: ObjC has distinctive top-of-file markers
+ *          (@interface, @implementation, #import, #include). MATLAB has none.
+ *          If any ObjC marker appears in the first ~4 KB, treat as ObjC;
+ *          otherwise MATLAB.
  */
 export function detectLanguage(filePath: string, source?: string): Language {
   // Play `conf/routes` has no grammar — route through the no-symbol path; the
@@ -247,6 +256,13 @@ export function detectLanguage(filePath: string, source?: string): Language {
   if (lang === 'c' && ext === '.h' && source) {
     if (looksLikeCpp(source)) return 'cpp';
     if (looksLikeObjc(source)) return 'objc';
+  }
+
+  // .m files could be Objective-C or MATLAB — check source content
+  // EXTENSION_MAP maps .m → objc as the safe default; override to matlab
+  // only when no ObjC markers are present.
+  if (lang === 'objc' && ext === '.m' && source) {
+    if (!looksLikeObjc4kb(source)) return 'matlab';
   }
 
   return lang;
@@ -267,6 +283,16 @@ function looksLikeCpp(source: string): boolean {
 function looksLikeObjc(source: string): boolean {
   const sample = source.substring(0, 8192);
   return /@(?:interface|implementation|protocol|synthesize)\b/.test(sample);
+}
+
+/**
+ * Heuristic: does a .m file look like Objective-C (vs MATLAB)?
+ * Checks the first ~4 KB for ObjC-specific top-of-file markers.
+ * MATLAB files never start with @interface/@implementation or #import/#include.
+ */
+function looksLikeObjc4kb(source: string): boolean {
+  const sample = source.slice(0, 4096);
+  return /^\s*(@interface\b|@implementation\b|#import\b|#include\b)/m.test(sample);
 }
 
 /**
@@ -372,6 +398,7 @@ export function getLanguageDisplayName(language: Language): string {
     objc: 'Objective-C',
     r: 'R',
     julia: 'Julia',
+    matlab: 'MATLAB',
     yaml: 'YAML',
     twig: 'Twig',
     xml: 'XML',

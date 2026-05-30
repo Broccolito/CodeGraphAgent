@@ -36,3 +36,15 @@ Perl — each documented as a numbered entry below when it lands.
   - `const_statement` wraps an inner `assignment` node
   - `macro_definition` has the same structure as `function_definition`
   - Call edges work via the standard `call_expression` in `callTypes`; `visitFunctionBody` recursively finds them
+
+### MATLAB (added 2026-05-30)
+- WASM grammar: `engine/src/extraction/wasm/tree-sitter-matlab.wasm` built locally from acristoffers/tree-sitter-matlab (upstream ships only Python wheels)
+- Extension map: `.m` is shared with Objective-C; disambiguated by `detectLanguage(filePath, content)` content heuristic that checks for ObjC markers (`@interface`, `@implementation`, `#import`, `#include`) in the first 4 KB. `EXTENSION_MAP` still maps `.m` → `objc` as the default; the heuristic overrides to `matlab` only when no ObjC markers are found.
+- Extractor: `engine/src/extraction/languages/matlab.ts`
+- Tests: extraction + disambiguation tests in `engine/__tests__/extraction.test.ts` (`MATLAB Extraction` describe block; 14 tests total)
+- Notes: MATLAB grammar (acristoffers/tree-sitter-matlab) key AST facts confirmed empirically:
+  - `function_definition`: field `'name'` → function identifier; `function_output` optional named child for return values; `function_arguments` named child for params; `block` named child for body
+  - Three function forms: `function greet()`, `function result = hello(name)`, `function [a,b] = swap(x,y)` — all produce `function_definition` nodes with the same structure
+  - `function_call`: field `'name'` → callee identifier; used for call edges via `callTypes: ['function_call']`
+  - `assignment`: fields `'left'` and `'right'`; top-level identifier-lhs assignments → variable nodes
+  - Grammar does NOT use `call_expression` (unlike most other languages); uses `function_call` instead
