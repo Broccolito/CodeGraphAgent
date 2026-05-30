@@ -146,3 +146,39 @@ def test_download_and_verify_sha_mismatch(tmp_path: Path, monkeypatch: pytest.Mo
         )
     assert excinfo.value.observed_sha == hashlib.sha256(payload).hexdigest()
     assert not dest.exists(), "Partial file must be removed on SHA mismatch"
+
+
+def test_extract_tarball(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "bin").mkdir()
+    (src_dir / "bin" / "codegraph").write_text("#!/bin/sh\necho hi\n")
+    (src_dir / "lib").mkdir()
+    (src_dir / "lib" / "x").write_text("data")
+
+    archive = tmp_path / "bundle.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        tf.add(src_dir, arcname=".")
+
+    dest = tmp_path / "extract-to"
+    bootstrap._extract(archive, dest)
+    assert (dest / "bin" / "codegraph").read_text() == "#!/bin/sh\necho hi\n"
+    assert (dest / "lib" / "x").read_text() == "data"
+
+
+def test_extract_replaces_existing_dest(tmp_path: Path):
+    """An existing engine dir is replaced atomically (rename, not in-place rm)."""
+    dest = tmp_path / "engine"
+    dest.mkdir()
+    (dest / "STALE").write_text("old")
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "NEW").write_text("new")
+    archive = tmp_path / "bundle.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        tf.add(src_dir, arcname=".")
+
+    bootstrap._extract(archive, dest)
+    assert (dest / "NEW").read_text() == "new"
+    assert not (dest / "STALE").exists()

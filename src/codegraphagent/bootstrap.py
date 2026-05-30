@@ -137,3 +137,36 @@ def _download_and_verify(*, url: str, dest: Path, expected_sha: str) -> None:
             expected_sha=expected_sha,
             observed_sha=observed,
         )
+
+
+def _extract(archive: Path, dest: Path) -> None:
+    """Extract `archive` (.tar.gz or .zip) into `dest`, atomically.
+
+    Extracts into a sibling temp dir first, then swaps it into place — so a
+    partial extraction can't leave `dest` in a broken half-state.
+    """
+    parent = dest.parent
+    parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix=".cga-extract-", dir=parent) as staging:
+        staging_path = Path(staging)
+        if archive.name.endswith(".zip"):
+            with zipfile.ZipFile(archive) as zf:
+                zf.extractall(staging_path)
+        else:
+            with tarfile.open(archive, "r:*") as tf:
+                tf.extractall(staging_path)
+
+        if dest.exists():
+            old_dest = parent / f".{dest.name}.old"
+            if old_dest.exists():
+                shutil.rmtree(old_dest)
+            dest.rename(old_dest)
+            try:
+                staging_path.rename(dest)
+            except OSError:
+                old_dest.rename(dest)
+                raise
+            shutil.rmtree(old_dest)
+        else:
+            staging_path.rename(dest)
