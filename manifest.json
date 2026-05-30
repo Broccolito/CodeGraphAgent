@@ -1,0 +1,35 @@
+{
+  "name": "codegraphagent",
+  "display_name": "CodeGraphAgent",
+  "description": "Pre-indexed code knowledge graph (callers, callees, impact, trace) via vendored CodeGraph engine. Per-project index stored at <project>/.biorouter/codegraph/.",
+  "version": "0.1.0",
+  "entry_point": "codegraphagent",
+  "repository": "https://github.com/Broccolito/CodeGraphAgent",
+  "tools_count": 9,
+  "env_vars": [
+    {
+      "key": "CODEGRAPH_NO_WATCH",
+      "required": false,
+      "auto_propagate": true,
+      "default": "",
+      "description": "Set to 1 to disable the file watcher (slow filesystems like WSL2)",
+      "secret": false
+    },
+    {
+      "key": "CODEGRAPH_ENGINE_PATH",
+      "required": false,
+      "auto_propagate": false,
+      "default": "",
+      "description": "Path to an already-extracted engine bundle (skips first-use download for air-gapped/CI)",
+      "secret": false
+    },
+    {
+      "key": "CODEGRAPH_ENGINE_VERSION",
+      "required": false,
+      "auto_propagate": false,
+      "default": "",
+      "description": "Override the pinned CodeGraphAgent engine release",
+      "secret": false
+    }
+  ]
+}
