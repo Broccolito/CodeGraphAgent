@@ -68,3 +68,25 @@ def test_ensure_layout_leaves_existing_symlink_alone(tmp_project: Path):
     paths.ensure_layout(tmp_project)
     mtime_after = link.lstat().st_mtime
     assert mtime_before == mtime_after
+
+
+def test_ensure_layout_writes_gitignore_for_codegraph_symlink(tmp_project: Path):
+    paths.ensure_layout(tmp_project)
+    content = (tmp_project / ".gitignore").read_text()
+    assert ".codegraph" in content
+
+
+def test_ensure_layout_does_not_duplicate_gitignore_entry(tmp_project: Path):
+    paths.ensure_layout(tmp_project)
+    paths.ensure_layout(tmp_project)
+    content = (tmp_project / ".gitignore").read_text()
+    assert content.count(".codegraph") == 1
+
+
+def test_ensure_layout_writes_state_dir_gitignore(tmp_project: Path):
+    paths.ensure_layout(tmp_project)
+    inner = tmp_project / ".biorouter" / "codegraph" / ".gitignore"
+    assert inner.exists()
+    content = inner.read_text()
+    for needle in ("*.db", "*.lock", ".dirty", "cache/"):
+        assert needle in content, f"missing {needle!r} in {content}"

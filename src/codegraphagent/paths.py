@@ -52,21 +52,48 @@ def ensure_layout(root: Path) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
 
     link = root / ".codegraph"
-    target = Path(".biorouter") / "codegraph"  # relative for portability
+    target = Path(".biorouter") / "codegraph"
 
-    if link.is_symlink():
-        return  # idempotent — assume it points where we want
-    if link.exists():
-        raise LayoutConflictError(
-            f"{link} exists as a real directory; "
-            "rename or remove it, then restart CodeGraphAgent",
-            path=str(link),
-        )
+    if not link.is_symlink():
+        if link.exists():
+            raise LayoutConflictError(
+                f"{link} exists as a real directory; "
+                "rename or remove it, then restart CodeGraphAgent",
+                path=str(link),
+            )
+        if sys.platform == "win32":
+            _create_windows_junction(link, root / target)
+        else:
+            link.symlink_to(target, target_is_directory=True)
 
-    if sys.platform == "win32":
-        _create_windows_junction(link, root / target)
+    _write_gitignores(root, state_dir)
+
+
+def _write_gitignores(root: Path, state_dir: Path) -> None:
+    """Append `.codegraph` to <root>/.gitignore (if absent) and write a
+    state-dir-local .gitignore that ignores the engine's runtime files."""
+    root_gitignore = root / ".gitignore"
+    if root_gitignore.exists():
+        existing = root_gitignore.read_text()
+        if ".codegraph" not in existing.splitlines():
+            with root_gitignore.open("a") as fh:
+                if not existing.endswith("\n"):
+                    fh.write("\n")
+                fh.write(".codegraph\n")
     else:
-        link.symlink_to(target, target_is_directory=True)
+        root_gitignore.write_text(".codegraph\n")
+
+    state_gitignore = state_dir / ".gitignore"
+    if not state_gitignore.exists():
+        state_gitignore.write_text(
+            "# CodeGraph runtime state — do not commit\n"
+            "*.db\n"
+            "*.db-wal\n"
+            "*.db-shm\n"
+            "*.lock\n"
+            ".dirty\n"
+            "cache/\n"
+        )
 
 
 def _create_windows_junction(link: Path, target: Path) -> None:
