@@ -92,3 +92,48 @@ def _load_manifest() -> dict:
         "url": base_url + platform_info["filename"],
         "sha256": platform_info["sha256"],
     }
+
+
+def _download_and_verify(*, url: str, dest: Path, expected_sha: str) -> None:
+    """Stream-download `url` to `dest`, verifying SHA-256 against
+    `expected_sha`. On mismatch, removes the partial file and raises
+    BootstrapError carrying both hashes.
+
+    A literal "PLACEHOLDER_FILLED_AT_RELEASE" expected_sha skips verification —
+    used only during local development before the first release is cut. The
+    bypass is logged.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+            with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                with dest.open("wb") as fh:
+                    for chunk in resp.iter_bytes(64 * 1024):
+                        fh.write(chunk)
+    except httpx.HTTPError as exc:
+        if dest.exists():
+            dest.unlink()
+        raise BootstrapError(
+            f"Engine download failed: {exc}",
+            url=url,
+        ) from exc
+
+    if expected_sha == "PLACEHOLDER_FILLED_AT_RELEASE":
+        import sys
+        print(
+            f"codegraphagent: skipping SHA verification (placeholder) for {url}",
+            file=sys.stderr,
+        )
+        return
+
+    observed = _sha256_of(dest)
+    if observed != expected_sha:
+        dest.unlink(missing_ok=True)
+        raise BootstrapError(
+            "Engine SHA-256 mismatch — refusing to install a tampered or "
+            "corrupt bundle. Re-running may help if the download was truncated.",
+            url=url,
+            expected_sha=expected_sha,
+            observed_sha=observed,
+        )
