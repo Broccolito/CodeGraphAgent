@@ -17,7 +17,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-import httpx
+import urllib.error
+import urllib.request
 
 from codegraphagent.errors import BootstrapError
 
@@ -104,14 +105,33 @@ def _download_and_verify(*, url: str, dest: Path, expected_sha: str) -> None:
     bypass is logged.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "codegraphagent/0.1.0"},
+    )
     try:
-        with httpx.Client(timeout=120.0, follow_redirects=True) as client:
-            with client.stream("GET", url) as resp:
-                resp.raise_for_status()
-                with dest.open("wb") as fh:
-                    for chunk in resp.iter_bytes(64 * 1024):
-                        fh.write(chunk)
-    except httpx.HTTPError as exc:
+        with urllib.request.urlopen(req, timeout=120.0) as resp:
+            with dest.open("wb") as fh:
+                while True:
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+    except urllib.error.HTTPError as exc:
+        if dest.exists():
+            dest.unlink()
+        raise BootstrapError(
+            f"Engine download failed: HTTP {exc.code}: {exc.reason}",
+            url=url,
+        ) from exc
+    except urllib.error.URLError as exc:
+        if dest.exists():
+            dest.unlink()
+        raise BootstrapError(
+            f"Engine download failed: {exc.reason}",
+            url=url,
+        ) from exc
+    except OSError as exc:
         if dest.exists():
             dest.unlink()
         raise BootstrapError(

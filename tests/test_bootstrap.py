@@ -79,27 +79,24 @@ def test_download_and_verify_success(tmp_path: Path, monkeypatch: pytest.MonkeyP
     class FakeResponse:
         def __init__(self, content: bytes):
             self._content = content
-            self.status_code = 200
-        def iter_bytes(self, chunk_size: int = 65536):
-            yield self._content
-        def raise_for_status(self):
-            pass
+            self._pos = 0
+        def read(self, n: int = -1) -> bytes:
+            if n == -1 or n >= len(self._content) - self._pos:
+                chunk = self._content[self._pos:]
+                self._pos = len(self._content)
+                return chunk
+            chunk = self._content[self._pos:self._pos + n]
+            self._pos += len(chunk)
+            return chunk
         def __enter__(self):
             return self
         def __exit__(self, *args):
             return False
 
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def stream(self, method, url):
-            return FakeResponse(payload)
+    def fake_urlopen(req, timeout=None):
+        return FakeResponse(payload)
 
-    monkeypatch.setattr(bootstrap.httpx, "Client", FakeClient)
+    monkeypatch.setattr(bootstrap.urllib.request, "urlopen", fake_urlopen)
 
     dest = tmp_path / "engine.tar.gz"
     bootstrap._download_and_verify(
@@ -114,28 +111,26 @@ def test_download_and_verify_sha_mismatch(tmp_path: Path, monkeypatch: pytest.Mo
     payload = b"wrong-bytes"
 
     class FakeResponse:
-        def __init__(self):
-            self.status_code = 200
-        def iter_bytes(self, chunk_size: int = 65536):
-            yield payload
-        def raise_for_status(self):
-            pass
+        def __init__(self, content: bytes):
+            self._content = content
+            self._pos = 0
+        def read(self, n: int = -1) -> bytes:
+            if n == -1 or n >= len(self._content) - self._pos:
+                chunk = self._content[self._pos:]
+                self._pos = len(self._content)
+                return chunk
+            chunk = self._content[self._pos:self._pos + n]
+            self._pos += len(chunk)
+            return chunk
         def __enter__(self):
             return self
         def __exit__(self, *args):
             return False
 
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def stream(self, method, url):
-            return FakeResponse()
+    def fake_urlopen(req, timeout=None):
+        return FakeResponse(payload)
 
-    monkeypatch.setattr(bootstrap.httpx, "Client", FakeClient)
+    monkeypatch.setattr(bootstrap.urllib.request, "urlopen", fake_urlopen)
 
     dest = tmp_path / "engine.tar.gz"
     with pytest.raises(BootstrapError) as excinfo:
