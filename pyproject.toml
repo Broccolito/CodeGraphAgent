@@ -7,7 +7,7 @@ name = "codegraphagent"
 version = "0.1.0"
 description = "BioRouter extension wrapping a vendored CodeGraph engine as an MCP server with per-project index in .biorouter/codegraph/"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 authors = [{name = "Wanjun Gu", email = "wanjun.gu@ucsf.edu"}]
 requires-python = ">=3.11"
 keywords = ["mcp", "biorouter", "codegraph", "code-intelligence", "knowledge-graph"]
