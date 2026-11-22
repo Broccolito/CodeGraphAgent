@@ -1,18 +1,26 @@
 {
   "name": "codegraphagent",
   "display_name": "CodeGraphAgent",
-  "description": "Pre-indexed code knowledge graph (callers, callees, impact, trace) via a vendored CodeGraph engine. First use: call codegraphagent_check_engine to download the ~45 MB engine bundle (one-time, takes 30-60s). After that, the codegraph_* tools become available. Per-project index stored at <project>/.biorouter/codegraph/.",
-  "version": "0.1.0",
+  "description": "Code knowledge graph for a project's source: explore, symbol lookup, search and callers, answered from a pre-built index. Runs the upstream CodeGraph 1.6.4 engine (MIT), which indexes about 30 languages including Python, R, TypeScript, JavaScript, C and C++, Rust, Go and Java. The first tool call downloads the engine (about 60 MB, once, checked against a pinned SHA-256). Index a project only when the user asks (codegraphagent_index_project, pass project_dir); the index lives in <project>/.codegraph-biorouter/. Telemetry and update checks are off.",
+  "version": "0.2.0",
   "entry_point": "codegraphagent",
   "repository": "https://github.com/Broccolito/CodeGraphAgent",
-  "tools_count": 9,
+  "tools_count": 5,
   "env_vars": [
     {
       "key": "CODEGRAPH_NO_WATCH",
       "required": false,
       "auto_propagate": true,
       "default": "",
-      "description": "Set to 1 to disable the file watcher (slow filesystems like WSL2)",
+      "description": "Set to 1 to disable the engine's file watcher (slow filesystems like WSL2 /mnt drives). Indexed projects then refresh only when re-indexed.",
+      "secret": false
+    },
+    {
+      "key": "CODEGRAPH_MCP_TOOLS",
+      "required": false,
+      "auto_propagate": true,
+      "default": "explore,node,search,callers",
+      "description": "Comma-separated engine tools to offer (upstream names without the codegraph_ prefix). Default: explore,node,search,callers. Others: callees, impact, files, status.",
       "secret": false
     },
     {
@@ -20,15 +28,7 @@
       "required": false,
       "auto_propagate": false,
       "default": "",
-      "description": "Path to an already-extracted engine bundle (skips first-use download for air-gapped/CI)",
-      "secret": false
-    },
-    {
-      "key": "CODEGRAPH_ENGINE_VERSION",
-      "required": false,
-      "auto_propagate": false,
-      "default": "",
-      "description": "Override the pinned CodeGraphAgent engine release",
+      "description": "Path to an already-extracted upstream CodeGraph 1.6.4 bundle (the folder holding codegraph-<platform>/). Skips the first-use download, for air-gapped machines and CI.",
       "secret": false
     }
   ]

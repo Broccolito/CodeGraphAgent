@@ -4,7 +4,7 @@ import codegraphagent
 
 
 def test_version_is_set():
-    assert codegraphagent.__version__ == "0.1.0"
+    assert codegraphagent.__version__ == "0.2.0"
 
 
 def test_cli_entrypoint_runs(tmp_path, monkeypatch):

@@ -1,105 +1,130 @@
-"""Project-root resolution and on-disk layout setup.
+"""Which project a call is about, and the folders the shim uses.
 
-The CodeGraph engine hardcodes its state directory as `.codegraph/` at the
-project root. We want our state under `.biorouter/codegraph/` instead, so we
-create the directory in `.biorouter/` and a symlink at `.codegraph` pointing
-to it. From the engine's perspective nothing changed.
+A stdio extension is never told which folder the chat is working in, so the
+project comes from each tool call's ``project_dir`` argument. When a call
+leaves it out, the shim falls back to ``BIOROUTER_WORKING_DIR``, but only when
+that variable is set and names a real project folder: never the home folder,
+a folder above it, or a filesystem root.
+
+The engine keeps each project's index in ``<project>/.codegraph-biorouter/``
+(upstream's ``CODEGRAPH_DIR`` setting). That name cannot collide with a
+project's own ``.codegraph/`` index or with upstream CodeGraph's global
+``~/.codegraph`` folder, and upstream skips every ``.codegraph-*`` folder when
+it indexes or watches a tree.
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-from codegraphagent.errors import LayoutConflictError
+# The per-project index folder name handed to the engine as CODEGRAPH_DIR.
+STATE_DIR_NAME = ".codegraph-biorouter"
 
-_PROJECT_MARKERS = (".biorouter", ".git", "pyproject.toml")
+
+def _canonical(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve()
+    except OSError:
+        return path.expanduser().absolute()
 
 
-def resolve_project_root() -> Path:
-    """Return the absolute path of the project root.
+def _fold(path: Path) -> str:
+    text = str(path)
+    if sys.platform in ("win32", "darwin"):
+        return text.lower()
+    return text
 
-    Order of preference:
-    1. $BIOROUTER_WORKING_DIR if set.
-    2. The nearest ancestor of CWD containing any of: .biorouter/, .git/,
-       pyproject.toml.
-    3. CWD as a fallback.
+
+def home_dir() -> Path:
+    return _canonical(Path.home())
+
+
+def unsafe_root_reason(path: Path) -> str | None:
+    """Return why ``path`` must never be a project root, or None if it may be.
+
+    Mirrors upstream's own refusal: the filesystem root, the home folder and
+    any folder above the home folder.
     """
-    env = os.environ.get("BIOROUTER_WORKING_DIR")
-    if env:
-        return Path(env).resolve()
+    resolved = _canonical(path)
+    if resolved.parent == resolved:
+        return "the filesystem root"
+    home = home_dir()
+    if _fold(resolved) == _fold(home):
+        return "your home folder"
+    if _fold(home).startswith(_fold(resolved) + os.sep):
+        return "a folder above your home folder"
+    return None
 
-    cwd = Path.cwd().resolve()
-    for candidate in [cwd, *cwd.parents]:
-        if any((candidate / marker).exists() for marker in _PROJECT_MARKERS):
+
+def fallback_project() -> Path | None:
+    """The project a call that names none falls back to, or None.
+
+    ``BIOROUTER_WORKING_DIR`` counts only when it is set, is a directory and is
+    not an unsafe root (see :func:`unsafe_root_reason`).
+    """
+    raw = os.environ.get("BIOROUTER_WORKING_DIR", "").strip()
+    if not raw:
+        return None
+    path = _canonical(Path(raw))
+    if not path.is_dir():
+        return None
+    if unsafe_root_reason(path) is not None:
+        return None
+    return path
+
+
+def resolve_project_dir(raw: object) -> Path | None:
+    """Turn a tool call's ``project_dir`` value into an absolute path.
+
+    ``~`` is expanded. A relative value is taken against the fallback project
+    when there is one; with no fallback it cannot be resolved and None is
+    returned. An empty or non-string value also returns None.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    path = Path(raw.strip()).expanduser()
+    if not path.is_absolute():
+        base = fallback_project()
+        if base is None:
+            return None
+        path = base / path
+    return _canonical(path)
+
+
+def run_dir() -> Path:
+    """An empty folder the engine runs in.
+
+    The engine is started outside every project so it never adopts a default
+    project of its own: each call names its project (or the shim fills in the
+    fallback). The folder lives inside the extension when it is writable, else
+    in the temporary folder.
+    """
+    candidates = [Path(__file__).parent / "run", Path(tempfile.gettempdir()) / "codegraphagent-run"]
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
             return candidate
-    return cwd
+        except OSError:
+            continue
+    return Path(tempfile.mkdtemp(prefix="codegraphagent-run-"))
 
 
-def ensure_layout(root: Path) -> None:
-    """Ensure `<root>/.biorouter/codegraph/` exists and `<root>/.codegraph` is
-    a symlink pointing at it.
+def engine_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment the engine child runs with.
 
-    Idempotent: safe to call repeatedly.
-
-    Raises:
-        LayoutConflictError: if `<root>/.codegraph` exists as a real
-            directory rather than a symlink.
+    Telemetry and the update check are always off, and the index folder name is
+    always :data:`STATE_DIR_NAME`, whatever the parent environment says. The
+    tool list defaults to upstream's documented four-tool surface; a user's own
+    ``CODEGRAPH_MCP_TOOLS`` wins.
     """
-    state_dir = root / ".biorouter" / "codegraph"
-    state_dir.mkdir(parents=True, exist_ok=True)
-
-    link = root / ".codegraph"
-    target = Path(".biorouter") / "codegraph"
-
-    if not link.is_symlink():
-        if link.exists():
-            raise LayoutConflictError(
-                f"{link} exists as a real directory; "
-                "rename or remove it, then restart CodeGraphAgent",
-                path=str(link),
-            )
-        if sys.platform == "win32":
-            _create_windows_junction(link, root / target)
-        else:
-            link.symlink_to(target, target_is_directory=True)
-
-    _write_gitignores(root, state_dir)
-
-
-def _write_gitignores(root: Path, state_dir: Path) -> None:
-    """Append `.codegraph` to <root>/.gitignore (if absent) and write a
-    state-dir-local .gitignore that ignores the engine's runtime files."""
-    root_gitignore = root / ".gitignore"
-    if root_gitignore.exists():
-        existing = root_gitignore.read_text()
-        if ".codegraph" not in existing.splitlines():
-            with root_gitignore.open("a") as fh:
-                if not existing.endswith("\n"):
-                    fh.write("\n")
-                fh.write(".codegraph\n")
-    else:
-        root_gitignore.write_text(".codegraph\n")
-
-    state_gitignore = state_dir / ".gitignore"
-    if not state_gitignore.exists():
-        state_gitignore.write_text(
-            "# CodeGraph runtime state — do not commit\n"
-            "*.db\n"
-            "*.db-wal\n"
-            "*.db-shm\n"
-            "*.lock\n"
-            ".dirty\n"
-            "cache/\n"
-        )
-
-
-def _create_windows_junction(link: Path, target: Path) -> None:
-    """Create a directory junction on Windows (doesn't need admin)."""
-    subprocess.run(
-        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
-        check=True,
-        capture_output=True,
-    )
+    env = dict(os.environ if base is None else base)
+    env["CODEGRAPH_TELEMETRY"] = "0"
+    env["DO_NOT_TRACK"] = "1"
+    env["CODEGRAPH_NO_UPDATE_CHECK"] = "1"
+    env["CODEGRAPH_DIR"] = STATE_DIR_NAME
+    if not env.get("CODEGRAPH_MCP_TOOLS", "").strip():
+        env["CODEGRAPH_MCP_TOOLS"] = "explore,node,search,callers"
+    return env

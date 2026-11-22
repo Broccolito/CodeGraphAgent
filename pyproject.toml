@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codegraphagent"
-version = "0.1.0"
-description = "BioRouter extension wrapping a vendored CodeGraph engine as an MCP server with per-project index in .biorouter/codegraph/"
+version = "0.2.0"
+description = "Biorouter extension that runs the upstream CodeGraph engine as an MCP server, with the project named on each call"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [{name = "Wanjun Gu", email = "wanjun.gu@ucsf.edu"}]

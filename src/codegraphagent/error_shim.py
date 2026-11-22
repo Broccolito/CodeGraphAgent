@@ -15,6 +15,7 @@ import json
 import sys
 from typing import BinaryIO
 
+from codegraphagent import __version__
 from codegraphagent.errors import (
     BootstrapError,
     CodeGraphAgentError,
@@ -63,10 +64,7 @@ def _error_text(exc: CodeGraphAgentError) -> str:
         )
     elif isinstance(exc, LayoutConflictError):
         parts.append(f"Path: {exc.path}")
-        parts.append(
-            "Recovery: rename or remove the conflicting .codegraph directory, "
-            "then restart the CodeGraphAgent extension."
-        )
+        parts.append("Recovery: fix the path above, then restart the CodeGraphAgent extension.")
     return "\n".join(parts)
 
 
@@ -90,8 +88,14 @@ def serve(
         except json.JSONDecodeError:
             continue
 
+        if not isinstance(req, dict):
+            continue
         method = req.get("method")
         req_id = req.get("id")
+
+        if "id" not in req or method is None:
+            # A notification, or a response to nothing we sent: never answered.
+            continue
 
         if method == "initialize":
             resp = {
@@ -102,7 +106,7 @@ def serve(
                         "protocolVersion", "2024-11-05"
                     ),
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "codegraphagent (degraded)", "version": "0.1.0"},
+                    "serverInfo": {"name": "codegraphagent (degraded)", "version": __version__},
                 },
             }
         elif method == "tools/list":
@@ -120,6 +124,8 @@ def serve(
                     "isError": True,
                 },
             }
+        elif method == "ping":
+            resp = {"jsonrpc": "2.0", "id": req_id, "result": {}}
         elif method == "shutdown":
             resp = {"jsonrpc": "2.0", "id": req_id, "result": None}
             out.write((json.dumps(resp) + "\n").encode())

@@ -29,7 +29,6 @@ codegraphagent.brxt
 *.tar.gz
 *.zip
 
-# Engine build outputs (built locally for testing)
-engine/release/
-engine/node_modules/
-engine/dist/
+# Runtime folders the shim creates inside the package
+src/codegraphagent/engine/
+src/codegraphagent/run/

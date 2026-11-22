@@ -1,43 +1,41 @@
 """CLI entry point for codegraphagent.
 
-Orchestrates the three (or four) pieces of the shim:
-  1. paths — resolve the project root and ensure the .biorouter/codegraph
-     state dir + .codegraph symlink exist.
-  2. bootstrap.cached_launcher — read-only check: is the engine bundle
-     already installed?
-  3. install_shim (only if not cached) — serves a minimal MCP server with
-     a single tool (codegraphagent_check_engine) that downloads + extracts
-     the engine on demand. Returns the launcher path when install succeeds.
-  4. proxy — spawn the engine and pump MCP traffic.
+1. bootstrap.cached_launcher: is the pinned engine already installed?
+2. install_shim (only if not): serves the engine's own tool surface (captured
+   from upstream 1.6.4) and, on the first tool call, downloads, verifies and
+   extracts the engine, then hands back the launcher, the client's initialize
+   request and that pending call.
+3. proxy: start the engine (``codegraph serve --mcp``) in an empty run
+   folder and pump MCP traffic, naming the project on each call.
 
-If the layout step fails (LayoutConflictError), we serve the legacy error_shim
-to surface that failure to the agent as a tool error. BootstrapError no longer
-happens in this function — it's caught inside install_shim and returned as a
-tool result so the user can see it and retry.
+Nothing here looks at the current folder: the project comes from each tool
+call's ``project_dir`` (see paths and proxy), so starting the extension in the
+home folder, next to upstream CodeGraph's global ``~/.codegraph``, works.
 """
 
 from __future__ import annotations
 
-from codegraphagent import bootstrap, error_shim, install_shim, paths, proxy
+from codegraphagent import __version__, bootstrap, error_shim, install_shim, proxy
 from codegraphagent.errors import CodeGraphAgentError
 
 
 def main() -> int:
     try:
-        root = paths.resolve_project_root()
-        paths.ensure_layout(root)
+        cached = bootstrap.cached_launcher()
     except CodeGraphAgentError as exc:
         error_shim.serve(exc)
         return 0
-
-    cached = bootstrap.cached_launcher()
     if cached is not None:
-        return proxy.run(launcher=cached, cwd=root)
+        return proxy.run(launcher=cached)
 
-    # Engine not cached — serve install-mode until the agent calls
-    # codegraphagent_check_engine (which triggers the download), or until
-    # shutdown / EOF.
-    launcher = install_shim.serve()
-    if launcher is None:
+    installed = install_shim.serve()
+    if installed is None:
         return 0
-    return proxy.run(launcher=launcher, cwd=root)
+    launcher, initialize_request, pending_call = installed
+    if initialize_request is None:
+        initialize_request = {
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                       "clientInfo": {"name": "codegraphagent", "version": __version__}},
+        }
+    return proxy.run(launcher=launcher, replay_initialize=initialize_request, pending_call=pending_call)

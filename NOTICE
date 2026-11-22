@@ -3,4 +3,7 @@ Copyright 2026 Baranzini Lab, University of California, San Francisco
 
 Licensed under the Apache License, Version 2.0.
 
-Portions of this repository are derived from CodeGraph and remain subject to the upstream MIT notice preserved under engine/LICENSE.
+At first use this extension downloads the CodeGraph engine (version 1.6.4,
+https://github.com/colbymchenry/codegraph, MIT License, Copyright (c) Colby
+McHenry) from its own GitHub release. No CodeGraph code is included in this
+repository or in the .brxt bundle; the engine archive carries its own licence.

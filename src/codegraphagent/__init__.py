@@ -1,3 +1,3 @@
-"""CodeGraphAgent — BioRouter extension wrapping a vendored CodeGraph engine."""
+"""CodeGraphAgent: a Biorouter extension that runs the upstream CodeGraph engine."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -76,3 +76,21 @@ def test_error_shim_layout_conflict():
     frames = [json.loads(l) for l in parent_out.getvalue().decode().splitlines() if l]
     tools_list = frames[1]["result"]["tools"]
     assert any(t["name"] == "codegraphagent_setup_error" for t in tools_list)
+
+
+def test_error_shim_does_not_answer_notifications():
+    import io, json
+    from codegraphagent import error_shim
+    from codegraphagent.errors import BootstrapError
+    inp = io.BytesIO()
+    for frame in (
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "shutdown"},
+    ):
+        inp.write((json.dumps(frame) + "\n").encode())
+    inp.seek(0)
+    out = io.BytesIO()
+    error_shim.serve(BootstrapError("x"), stdin=inp, stdout=out)
+    frames = [json.loads(l) for l in out.getvalue().decode().splitlines() if l]
+    assert [f.get("id") for f in frames] == [1, 2]

@@ -93,111 +93,213 @@ def test_tools_call_codegraph_search_passes_through_to_engine(tmp_path: Path):
     assert "FAKE search result" in text and "hello" in text
 
 
-def test_tools_call_index_project_invokes_launcher_subprocess(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """When the agent calls codegraphagent_index_project, the proxy shells
-    out to <launcher> init (or index --force) against cwd, captures the
-    output, and returns it as a tool result. Engine is NOT involved."""
-    fake_subprocess_run_calls = []
+class _FakeCompleted:
+    def __init__(self, rc=0, stdout=b"", stderr=b""):
+        self.returncode = rc
+        self.stdout = stdout
+        self.stderr = stderr
 
-    class FakeCompleted:
-        def __init__(self, rc, stdout, stderr):
-            self.returncode = rc
-            self.stdout = stdout
-            self.stderr = stderr
 
-    def fake_run(cmd, **kwargs):
-        fake_subprocess_run_calls.append((cmd, kwargs))
-        return FakeCompleted(0, b"Indexed 3 files, 10 nodes.\n", b"")
+def _index_call(arguments: dict) -> list[dict]:
+    return [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "codegraphagent_index_project", "arguments": arguments}},
+        {"jsonrpc": "2.0", "id": 3, "method": "shutdown"},
+    ]
 
-    monkeypatch.setattr(proxy.subprocess, "run", fake_run)
 
+def _run_frames(frames: list[dict], tmp_path: Path) -> list[dict]:
     parent_in = io.BytesIO()
-    _send(parent_in, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
-    _send(parent_in, {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                      "params": {"name": "codegraphagent_index_project",
-                                 "arguments": {}}})
-    _send(parent_in, {"jsonrpc": "2.0", "id": 3, "method": "shutdown"})
-
+    for frame in frames:
+        _send(parent_in, frame)
     parent_out = io.BytesIO()
-    rc = _run_proxy(parent_in, parent_out, tmp_path)
+    assert _run_proxy(parent_in, parent_out, tmp_path) == 0
+    return _parse_frames(parent_out)
+
+
+@pytest.fixture
+def project(tmp_path: Path, clean_env) -> Path:
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    return proj
+
+
+def test_index_project_runs_init_in_the_named_project(project: Path, tmp_path: Path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(proxy.subprocess, "run",
+                        lambda cmd, **kw: (calls.append((cmd, kw)), _FakeCompleted(0, b"Indexed 3 files.\n"))[1])
+    frames = _run_frames(_index_call({"project_dir": str(project)}), tmp_path)
+
+    assert len(calls) == 1
+    cmd, kwargs = calls[0]
+    assert cmd[0] == sys.executable
+    assert cmd[1:] == ["init", str(project.resolve()), "--yes", "--local-only"]
+    assert "--force" not in cmd
+    assert kwargs["cwd"] == str(project.resolve())
+    env = kwargs["env"]
+    assert env["CODEGRAPH_TELEMETRY"] == "0" and env["DO_NOT_TRACK"] == "1"
+    assert env["CODEGRAPH_DIR"] == ".codegraph-biorouter"
+    resp = next(f for f in frames if f.get("id") == 2)
+    assert resp["result"]["isError"] is False
+    assert "Indexed 3 files" in resp["result"]["content"][0]["text"]
+
+
+def test_index_project_reindexes_when_the_index_exists(project: Path, tmp_path: Path, monkeypatch):
+    (project / ".codegraph-biorouter").mkdir()
+    (project / ".codegraph-biorouter" / "codegraph.db").write_text("")
+    calls = []
+    monkeypatch.setattr(proxy.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), _FakeCompleted())[1])
+    _run_frames(_index_call({"project_dir": str(project)}), tmp_path)
+    assert calls[0][1:] == ["index", str(project.resolve()), "--quiet"]
+
+
+def test_index_project_refuses_home(tmp_path: Path, clean_env, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(proxy.paths.Path, "home", classmethod(lambda cls: home))
+    calls = []
+    monkeypatch.setattr(proxy.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), _FakeCompleted())[1])
+    frames = _run_frames(_index_call({"project_dir": str(home)}), tmp_path)
+    assert calls == []
+    resp = next(f for f in frames if f.get("id") == 2)
+    assert resp["result"]["isError"] is True
+    assert "home folder" in resp["result"]["content"][0]["text"]
+
+
+def test_index_project_without_a_project_asks_for_one(tmp_path: Path, clean_env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(proxy.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), _FakeCompleted())[1])
+    frames = _run_frames(_index_call({}), tmp_path)
+    assert calls == []
+    resp = next(f for f in frames if f.get("id") == 2)
+    assert resp["result"]["isError"] is True
+    assert "project_dir" in resp["result"]["content"][0]["text"]
+
+
+def test_index_project_uses_the_fallback_project(project: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("BIOROUTER_WORKING_DIR", str(project))
+    calls = []
+    monkeypatch.setattr(proxy.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), _FakeCompleted())[1])
+    _run_frames(_index_call({}), tmp_path)
+    assert calls[0][2] == str(project.resolve())
+
+
+def test_index_project_reports_subprocess_failure(project: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(proxy.subprocess, "run",
+                        lambda cmd, **kw: _FakeCompleted(1, b"", b"boom: missing grammars\n"))
+    frames = _run_frames(_index_call({"project_dir": str(project)}), tmp_path)
+    resp = next(f for f in frames if f.get("id") == 2)
+    assert resp["result"]["isError"] is True
+    text = resp["result"]["content"][0]["text"]
+    assert "failed" in text and "boom: missing grammars" in text
+
+
+def test_tools_list_renames_project_path_and_marks_it_required_without_fallback(
+    tmp_path: Path, clean_env
+):
+    frames = _run_frames([
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "shutdown"},
+    ], tmp_path)
+    tools = {t["name"]: t for t in next(f for f in frames if f.get("id") == 2)["result"]["tools"]}
+    for name in ("codegraph_search", "codegraph_callers"):
+        schema = tools[name]["inputSchema"]
+        assert "projectPath" not in schema["properties"]
+        assert "project_dir" in schema["properties"]
+        assert "project_dir" in schema["required"]
+        assert "projectPath" not in schema["required"]
+    assert "projectPath" not in tools["codegraph_search"]["description"]
+    index_tool = tools["codegraph_index_project".replace("codegraph_", "codegraphagent_")]
+    assert index_tool["annotations"]["readOnlyHint"] is False
+    assert index_tool["inputSchema"]["required"] == ["project_dir"]
+
+
+def test_tools_list_makes_project_dir_optional_with_a_fallback(project: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("BIOROUTER_WORKING_DIR", str(project))
+    frames = _run_frames([
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "shutdown"},
+    ], tmp_path)
+    tools = {t["name"]: t for t in next(f for f in frames if f.get("id") == 2)["result"]["tools"]}
+    assert tools["codegraph_search"]["inputSchema"]["required"] == ["query"]
+
+
+def test_initialize_instructions_get_the_biorouter_note(tmp_path: Path, clean_env):
+    frames = _run_frames([
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 3, "method": "shutdown"},
+    ], tmp_path)
+    instructions = next(f for f in frames if f.get("id") == 1)["result"]["instructions"]
+    assert instructions.startswith("Fake instructions. Pass project_dir.")
+    assert "codegraphagent_index_project" in instructions
+    assert ".codegraph-biorouter" in instructions
+
+
+def test_tools_call_maps_project_dir_to_project_path(project: Path, tmp_path: Path):
+    frames = _run_frames([
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "codegraph_search", "arguments": {"query": "q", "project_dir": str(project)}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "shutdown"},
+    ], tmp_path)
+    text = next(f for f in frames if f.get("id") == 2)["result"]["content"][0]["text"]
+    assert f"projectPath={str(project.resolve())!r}" in text
+    assert "has_project_dir=False" in text
+
+
+def test_tools_call_without_a_project_uses_the_fallback(project: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("BIOROUTER_WORKING_DIR", str(project))
+    frames = _run_frames([
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "codegraph_search", "arguments": {"query": "q"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "shutdown"},
+    ], tmp_path)
+    text = next(f for f in frames if f.get("id") == 2)["result"]["content"][0]["text"]
+    assert f"projectPath={str(project.resolve())!r}" in text
+
+
+def test_tools_call_never_falls_back_to_home(tmp_path: Path, clean_env, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(proxy.paths.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("BIOROUTER_WORKING_DIR", str(home))
+    frames = _run_frames([
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "codegraph_search", "arguments": {"query": "q"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "shutdown"},
+    ], tmp_path)
+    text = next(f for f in frames if f.get("id") == 2)["result"]["content"][0]["text"]
+    assert "projectPath=None" in text
+
+
+def test_replayed_initialize_reaches_a_strict_engine_first(tmp_path: Path, clean_env):
+    """After a first-use install the client's handshake was answered by the
+    install shim; the engine must still be initialized before tools/list."""
+    parent_in = io.BytesIO()
+    _send(parent_in, {"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
+    _send(parent_in, {"jsonrpc": "2.0", "id": 8, "method": "shutdown"})
+    parent_in.seek(0)
+    parent_out = io.BytesIO()
+    rc = proxy.run(
+        launcher=Path(sys.executable),
+        cwd=tmp_path,
+        argv_override=[*FAKE_ENGINE_ARGV, "--strict-init"],
+        env_override={"PYTHONPATH": str(REPO_ROOT)},
+        stdin=parent_in,
+        stdout=parent_out,
+        stderr=sys.stderr.buffer,
+        replay_initialize={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    )
     assert rc == 0
-
-    # Exactly one subprocess.run call, against a launcher with init or index.
-    assert len(fake_subprocess_run_calls) == 1
-    cmd, kwargs = fake_subprocess_run_calls[0]
-    assert cmd[0] == sys.executable  # launcher (Python in tests)
-    assert cmd[1] in ("init", "index")
-    assert kwargs.get("cwd") == str(tmp_path)
-
-    # Proxy returned a non-error tool result with the captured stdout.
     frames = _parse_frames(parent_out)
-    index_resp = next(f for f in frames if f.get("id") == 2)
-    assert index_resp["result"]["isError"] is False
-    text = index_resp["result"]["content"][0]["text"]
-    assert "Indexing complete" in text
-    assert "Indexed 3 files" in text
-
-
-def test_tools_call_index_project_picks_index_force_when_db_exists(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """If .codegraph/codegraph.db exists, use `index --force` (re-index) not `init`."""
-    db_path = tmp_path / ".codegraph" / "codegraph.db"
-    db_path.parent.mkdir(parents=True)
-    db_path.write_text("")
-
-    captured = []
-    class FakeCompleted:
-        returncode = 0
-        stdout = b""
-        stderr = b""
-    monkeypatch.setattr(proxy.subprocess, "run",
-                        lambda cmd, **kw: (captured.append(cmd), FakeCompleted())[1])
-
-    parent_in = io.BytesIO()
-    _send(parent_in, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
-    _send(parent_in, {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                      "params": {"name": "codegraphagent_index_project",
-                                 "arguments": {}}})
-    _send(parent_in, {"jsonrpc": "2.0", "id": 3, "method": "shutdown"})
-
-    parent_out = io.BytesIO()
-    _run_proxy(parent_in, parent_out, tmp_path)
-
-    assert len(captured) == 1
-    cmd = captured[0]
-    assert "index" in cmd and "--force" in cmd
-    assert "init" not in cmd
-
-
-def test_tools_call_index_project_reports_subprocess_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    class FakeCompleted:
-        returncode = 1
-        stdout = b""
-        stderr = b"boom: missing grammars\n"
-    monkeypatch.setattr(proxy.subprocess, "run",
-                        lambda cmd, **kw: FakeCompleted())
-
-    parent_in = io.BytesIO()
-    _send(parent_in, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
-    _send(parent_in, {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                      "params": {"name": "codegraphagent_index_project",
-                                 "arguments": {}}})
-    _send(parent_in, {"jsonrpc": "2.0", "id": 3, "method": "shutdown"})
-
-    parent_out = io.BytesIO()
-    _run_proxy(parent_in, parent_out, tmp_path)
-
-    frames = _parse_frames(parent_out)
-    index_resp = next(f for f in frames if f.get("id") == 2)
-    assert index_resp["result"]["isError"] is True
-    text = index_resp["result"]["content"][0]["text"]
-    assert "Indexing failed" in text
-    assert "boom: missing grammars" in text
+    # The replayed initialize's answer is swallowed; the client sees only its own ids.
+    assert [f.get("id") for f in frames] == [7, 8]
+    assert "result" in frames[0] and frames[0]["result"]["tools"]
 
 
 def test_engine_exit_code_propagates(tmp_path: Path):
@@ -216,3 +318,27 @@ def test_engine_exit_code_propagates(tmp_path: Path):
         stderr=sys.stderr.buffer,
     )
     assert rc == 42
+
+
+def test_pending_call_is_answered_by_the_engine_after_the_replay(project: Path, tmp_path: Path):
+    parent_in = io.BytesIO()
+    _send(parent_in, {"jsonrpc": "2.0", "id": 8, "method": "shutdown"})
+    parent_in.seek(0)
+    parent_out = io.BytesIO()
+    rc = proxy.run(
+        launcher=Path(sys.executable),
+        cwd=tmp_path,
+        argv_override=[*FAKE_ENGINE_ARGV, "--strict-init"],
+        env_override={"PYTHONPATH": str(REPO_ROOT)},
+        stdin=parent_in,
+        stdout=parent_out,
+        stderr=sys.stderr.buffer,
+        replay_initialize={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        pending_call={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                      "params": {"name": "codegraph_search",
+                                 "arguments": {"query": "q", "project_dir": str(project)}}},
+    )
+    assert rc == 0
+    frames = _parse_frames(parent_out)
+    assert [f.get("id") for f in frames] == [2, 8]
+    assert f"projectPath={str(project.resolve())!r}" in frames[0]["result"]["content"][0]["text"]

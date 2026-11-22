@@ -1,20 +1,18 @@
-"""Install-mode MCP server.
+"""Install-mode MCP server, used until the engine is on disk.
 
-When the CodeGraph engine isn't cached locally, the shim serves this
-mini-MCP server first. It exposes a single tool, ``codegraphagent_check_engine``,
-that downloads + verifies + extracts the engine on demand. While the engine
-is missing, no other tools are visible — so the agent must call check_engine
-first.
+Biorouter reads an extension's tool list once, when the extension starts, and
+does not re-read it on ``notifications/tools/list_changed``. So the shim offers
+the engine's real tool surface from the first ``tools/list``: the tool
+definitions and server instructions upstream CodeGraph 1.6.4 itself serves,
+captured into ``engine_surface.json`` and passed through the same rewrite the
+proxy applies (``project_dir``, the index tool, the Biorouter note).
 
-After a successful check_engine call, ``serve`` returns the launcher path so
-the caller (``cli.main``) can transition into proxy mode.
-
-Why a tool call instead of an automatic download at startup: the engine bundle
-is ~45 MB and the first install takes 30-60 seconds. An automatic download
-blocks the MCP ``initialize`` handshake with no progress feedback, which
-shows up in BioRouter's UI as a hung extension. Pushing the work into an
-explicit, agent-invoked tool call surfaces the wait time with a clear "this
-will take a moment" message.
+The first ``tools/call`` downloads, verifies and extracts the pinned engine
+(about 60 MB, once per install; seconds on a fast connection). The shim then
+returns the launcher, the client's ``initialize`` request and that pending
+call, and the caller starts the engine, replays the handshake and forwards the
+call. A failed download is answered as a tool error and the shim stays in
+install mode, so the next call retries.
 """
 
 from __future__ import annotations
@@ -24,33 +22,45 @@ import sys
 from pathlib import Path
 from typing import BinaryIO
 
-from codegraphagent import bootstrap
+from codegraphagent import __version__, bootstrap, paths, proxy
 from codegraphagent.errors import BootstrapError
 
+_SURFACE_PATH = Path(__file__).parent / "engine_surface.json"
 
-_CHECK_ENGINE_TOOL = {
-    "name": "codegraphagent_check_engine",
-    "description": (
-        "Check whether the CodeGraph engine binary is installed locally. "
-        "If not, download and install it (~45 MB, takes about 30-60 seconds "
-        "on a typical connection). "
-        "MUST be called before using any codegraph_* tools when the extension "
-        "is first installed. Subsequent calls return immediately."
-    ),
-    "inputSchema": {"type": "object", "properties": {}, "required": []},
-}
+
+def _surface() -> dict:
+    with _SURFACE_PATH.open() as fh:
+        return json.load(fh)
+
+
+def static_tools() -> list[dict]:
+    """The engine tools ``CODEGRAPH_MCP_TOOLS`` allows, as upstream defines them."""
+    allow_raw = paths.engine_env().get("CODEGRAPH_MCP_TOOLS", "")
+    allow = {s.strip().removeprefix("codegraph_") for s in allow_raw.split(",") if s.strip()}
+    tools = _surface()["tools"]
+    return [t for t in tools if t["name"].removeprefix("codegraph_") in allow] if allow else tools
+
+
+def static_initialize_result(requested_version: str | None) -> dict:
+    surface = _surface()
+    result = {
+        "protocolVersion": requested_version or surface.get("protocolVersion", "2024-11-05"),
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "codegraphagent", "version": __version__},
+        "instructions": surface.get("instructions", ""),
+    }
+    return proxy.rewrite_initialize(result)
 
 
 def serve(
     *,
     stdin: BinaryIO | None = None,
     stdout: BinaryIO | None = None,
-) -> Path | None:
-    """Serve MCP in install-mode.
+) -> tuple[Path, dict | None, dict] | None:
+    """Serve MCP in install mode.
 
-    Returns the engine launcher path on successful install, or None on
-    shutdown / stdin EOF. The caller is expected to spawn the engine and
-    enter proxy mode if a Path is returned.
+    Returns ``(launcher, initialize_request, pending_call)`` once the engine is
+    installed, or None on shutdown / end of input.
     """
     inp = stdin or sys.stdin.buffer
     out = stdout or sys.stdout.buffer
@@ -59,127 +69,66 @@ def serve(
         out.write((json.dumps(frame) + "\n").encode())
         out.flush()
 
+    initialize_request: dict | None = None
+
     while True:
         line = inp.readline()
         if not line:
             return None
-
         try:
             req = json.loads(line)
         except json.JSONDecodeError:
             continue
-
+        if not isinstance(req, dict):
+            continue
         method = req.get("method")
         req_id = req.get("id")
 
+        if "id" not in req or method is None:
+            # A notification (never answered), or a response to nothing we sent.
+            continue
+
         if method == "initialize":
+            initialize_request = req
+            params = req.get("params") if isinstance(req.get("params"), dict) else {}
             write_frame({
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {
-                    "protocolVersion": req.get("params", {}).get(
-                        "protocolVersion", "2024-11-05"
-                    ),
-                    "capabilities": {"tools": {"listChanged": True}},
-                    "serverInfo": {
-                        "name": "codegraphagent (install pending)",
-                        "version": "0.1.0",
-                    },
-                },
+                "result": static_initialize_result(params.get("protocolVersion")),
             })
         elif method == "tools/list":
             write_frame({
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"tools": [_CHECK_ENGINE_TOOL]},
+                "result": proxy.rewrite_tools_list({"tools": static_tools()}),
             })
         elif method == "tools/call":
-            name = req.get("params", {}).get("name")
-            if name == "codegraphagent_check_engine":
-                # Re-check cache in case another process installed the engine.
-                cached = bootstrap.cached_launcher()
-                if cached:
-                    write_frame({
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "result": {
-                            "content": [{
-                                "type": "text",
-                                "text": (
-                                    "CodeGraph engine is already installed. "
-                                    "Ready to use."
-                                ),
-                            }],
-                            "isError": False,
-                        },
-                    })
-                    write_frame({
-                        "jsonrpc": "2.0",
-                        "method": "notifications/tools/list_changed",
-                    })
-                    return cached
-
-                try:
-                    launcher = bootstrap.ensure_engine()
-                except BootstrapError as exc:
-                    write_frame({
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "result": {
-                            "content": [{
-                                "type": "text",
-                                "text": _format_bootstrap_error(exc),
-                            }],
-                            "isError": True,
-                        },
-                    })
-                    continue  # stay in loop so the user can retry
-
+            try:
+                launcher = bootstrap.cached_launcher() or bootstrap.ensure_engine()
+            except BootstrapError as exc:
                 write_frame({
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "result": {
-                        "content": [{
-                            "type": "text",
-                            "text": (
-                                "CodeGraph engine installed successfully. "
-                                "You can now call any of the codegraph_* tools."
-                            ),
-                        }],
-                        "isError": False,
-                    },
-                })
-                write_frame({
-                    "jsonrpc": "2.0",
-                    "method": "notifications/tools/list_changed",
-                })
-                return launcher
-            else:
-                write_frame({
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {
-                        "content": [{
-                            "type": "text",
-                            "text": (
-                                f"Tool {name!r} is unavailable until the engine "
-                                "is installed. Call codegraphagent_check_engine first."
-                            ),
-                        }],
+                        "content": [{"type": "text", "text": _format_bootstrap_error(exc)}],
                         "isError": True,
                     },
                 })
+                continue  # stay in install mode; the next call retries
+            return launcher, initialize_request, req
+        elif method == "ping":
+            write_frame({"jsonrpc": "2.0", "id": req_id, "result": {}})
         elif method == "shutdown":
             write_frame({"jsonrpc": "2.0", "id": req_id, "result": None})
             return None
+        elif method in ("resources/list", "prompts/list"):
+            key = "resources" if method == "resources/list" else "prompts"
+            write_frame({"jsonrpc": "2.0", "id": req_id, "result": {key: []}})
         else:
             write_frame({
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "error": {
-                    "code": -32601,
-                    "message": f"Method not found: {method}",
-                },
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
             })
 
 
@@ -191,7 +140,8 @@ def _format_bootstrap_error(exc: BootstrapError) -> str:
         parts.append(f"Expected SHA-256: {exc.expected_sha}")
         parts.append(f"Observed SHA-256: {exc.observed_sha}")
     parts.append(
-        "You can retry by calling codegraphagent_check_engine again, or set "
-        "the CODEGRAPH_ENGINE_PATH env var to a pre-downloaded bundle."
+        "Calling the tool again retries the download. On a machine without "
+        "internet access, set CODEGRAPH_ENGINE_PATH to an extracted upstream "
+        f"CodeGraph {_surface()['engine_version']} bundle."
     )
     return "\n".join(parts)

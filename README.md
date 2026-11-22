@@ -1,116 +1,89 @@
 # CodeGraphAgent
 
-A [BioRouter](https://github.com/BaranziniLab/BioRouter) extension (`.brxt`)
-that gives the agent a **pre-indexed code knowledge graph**. Ask
-*"where is X used?"*, *"what does Y call?"*, or *"what breaks if I change Z?"*
-and get answers in milliseconds — without grepping the codebase on every
-query.
+A [Biorouter](https://github.com/BaranziniLab/biorouter) extension (`.brxt`) that gives the agent a
+pre-built code knowledge graph of a project: ask where a function is used, what it calls, or how an
+area of the code fits together, and get the answer from an index instead of a grep and read loop.
 
-Built on a vendored fork of [CodeGraph](https://github.com/colbymchenry/codegraph)
-(MIT, © Colby McHenry) with **bioinformatics-friendly language additions**:
-R, Julia, MATLAB, and Perl on top of upstream's 19.
-
-[![Latest release](https://img.shields.io/github/v/release/Broccolito/CodeGraphAgent?include_prereleases)](https://github.com/Broccolito/CodeGraphAgent/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+It runs the upstream [CodeGraph](https://github.com/colbymchenry/codegraph) engine, version 1.6.4
+(MIT, Colby McHenry), unmodified. CodeGraph indexes about 30 languages, among them Python, R,
+TypeScript and JavaScript, C and C++, Rust, Go, Java, Kotlin, Swift, Ruby, PHP and Lua.
 
 ## Install
 
-1. Download [`codegraphagent.brxt`](https://github.com/Broccolito/CodeGraphAgent/releases/latest/download/codegraphagent.brxt) (~18 KB)
-2. In BioRouter: **Settings → Extensions → Install from file** → select the `.brxt`
-3. Enable the extension in your session
+1. Download [`codegraphagent.brxt`](https://github.com/Broccolito/CodeGraphAgent/releases/latest/download/codegraphagent.brxt).
+2. In Biorouter: **Settings, Extensions, Install from file**, and pick the `.brxt`; or
+   `biorouter extension install codegraphagent.brxt`.
 
-That's it. `uv sync` finishes in seconds — there are zero external Python dependencies.
+The bundle is about 30 KB and has no Python dependencies. The engine (about 60 MB) is downloaded
+from upstream's own GitHub release the first time a CodeGraphAgent tool is called, checked against
+the SHA-256 pinned in `src/codegraphagent/release_manifest.json`, and kept inside the extension.
 
-## First-run flow
+## Tools
 
-The first time you use the extension in a session, the agent sees a single tool:
-
-- **`codegraphagent_check_engine`** — call this first. Downloads, verifies, and extracts the CodeGraph engine bundle (~45 MB, 30–60 s on a typical connection). One-time per machine.
-
-After the engine is installed, the agent gets the full toolkit:
-
-- **`codegraphagent_index_project`** — build (or rebuild) the index for the current project. Must be called once before queries return results; re-call after major code changes.
-- The engine's 10 query tools (next section).
-
-The two-step flow is deliberate: an explicit, agent-visible install is better UX than a silent 30–60 second stall during MCP initialize.
-
-## Query tools (proxied from the engine)
-
-| Tool | Question it answers |
+| Tool | What it does |
 | --- | --- |
-| `codegraph_search` | Find symbols by name (FTS5). |
-| `codegraph_callers` | Who calls function X? |
-| `codegraph_callees` | What does function X call? |
-| `codegraph_trace` | Show call paths between two symbols. |
-| `codegraph_impact` | What's affected if I change X? |
-| `codegraph_node` | Details + source for a specific symbol. |
-| `codegraph_explore` | Group related symbols by file. |
-| `codegraph_context` | Build a relevant context window for a task. |
-| `codegraph_status` | Index health and statistics. |
-| `codegraph_files` | Project file tree with per-file symbol counts. |
+| `codegraph_explore` | One call returns the source of the symbols relevant to a question, the call paths between them, and what depends on them. |
+| `codegraph_node` | One symbol's source and callers, or a file with line numbers. |
+| `codegraph_search` | Find symbols by name (locations only). |
+| `codegraph_callers` | Who calls a function. |
+| `codegraphagent_index_project` | Build or refresh a project's index. |
 
-The index lives at `<project>/.biorouter/codegraph/codegraph.db` (per-project, SQLite, WAL mode).
+The first four are upstream's own tools (its documented four-tool surface,
+`CODEGRAPH_MCP_TOOLS=explore,node,search,callers`). Every one takes `project_dir`, the absolute
+path of the project: a stdio extension is never told which folder the chat is working in. When a
+call leaves it out and `BIOROUTER_WORKING_DIR` names a project folder (not the home folder, a folder
+above it or the filesystem root), that folder is used.
 
-## Languages supported
+Indexing is the user's decision, as upstream says: the agent is told to call
+`codegraphagent_index_project` only when you ask for it, and the tool is marked as a write (not
+read-only), so a Biorouter mode that asks before writes asks before it runs. The index lives in
+`<project>/.codegraph-biorouter/`, which ignores itself in git, so it never shows in `git status`,
+never collides with a project's own `.codegraph/` or with upstream's global `~/.codegraph`, and is
+removed by deleting that folder. The home folder, folders above it and the filesystem root are never
+indexed.
 
-**v0.1.0 adds 4 new languages on top of upstream's 19** (23 total):
+Telemetry and update checks are off: the engine always runs with `CODEGRAPH_TELEMETRY=0`,
+`DO_NOT_TRACK=1` and `CODEGRAPH_NO_UPDATE_CHECK=1`.
 
-| Category | Languages |
-| --- | --- |
-| **Bioinformatics & numerics** (added by us) | R, Julia, MATLAB, Perl |
-| Scripting | Python, Ruby, Lua, Luau |
-| Compiled systems | Rust, Go, C, C++, C#, Swift, Kotlin |
-| Web | TypeScript, JavaScript, PHP, Dart |
-| Other | Java, Scala, Objective-C, Pascal |
-
-For the `.m` extension (shared between MATLAB and Objective-C), the engine sniffs file content for ObjC markers (`@interface`, `@implementation`, `#import`, `#include`) and falls back to MATLAB when none are present.
-
-## Configuration (optional env vars)
+## Settings (optional)
 
 | Variable | Purpose |
 | --- | --- |
-| `CODEGRAPH_ENGINE_PATH` | Path to an already-extracted engine bundle. Skips the on-first-use download — useful for air-gapped or CI environments. |
-| `CODEGRAPH_ENGINE_VERSION` | Override the pinned engine release tag. |
-| `CODEGRAPH_NO_WATCH` | Set to `1` to disable the engine's file watcher (slow filesystems like WSL2 `/mnt`). |
+| `CODEGRAPH_MCP_TOOLS` | Engine tools to offer, upstream names without the `codegraph_` prefix. Default `explore,node,search,callers`; `callees`, `impact`, `files` and `status` can be added. |
+| `CODEGRAPH_NO_WATCH` | `1` turns off the engine's file watcher (slow filesystems such as WSL2 `/mnt` drives). The index then refreshes only when re-indexed. |
+| `CODEGRAPH_ENGINE_PATH` | An already-extracted upstream 1.6.4 bundle (the folder holding `codegraph-<platform>/`), for machines without internet access. |
 
 ## How it works
 
 ```text
-BioRouter agent
-   │ MCP over stdio
-   ▼
-codegraphagent (Python shim, ~18 KB .brxt)
-   ├── install mode (engine not cached)
-   │     exposes only codegraphagent_check_engine
-   │     downloads engine bundle from this repo's releases
-   │
-   └── proxy mode (engine cached)
-         intercepting MCP proxy:
-           ├─ injects codegraphagent_index_project into tools/list
-           ├─ handles index_project locally (shells out to engine CLI)
-           └─ forwards everything else (codegraph_*) to the engine
-
-   engine subprocess (vendored CodeGraph, Node.js bundled)
-   └── owns <project>/.biorouter/codegraph/codegraph.db
-       (symlinked from <project>/.codegraph for upstream compatibility)
+Biorouter ── MCP over stdio ──> codegraphagent (Python, stdlib only)
+                                  │  names the project on each call (project_dir -> projectPath),
+                                  │  adds codegraphagent_index_project, sets telemetry off
+                                  └─> codegraph serve --mcp (upstream 1.6.4, its own Node runtime)
 ```
 
-The shim is **pure stdlib Python** — no fastmcp, no httpx, no external deps. The engine is a self-contained Node.js bundle (the engine binary downloads independently on first use, keeping the `.brxt` tiny).
+Biorouter reads an extension's tool list once, when it starts, so the shim answers with the engine's
+real tool list from the start (captured from 1.6.4 into `engine_surface.json`) and downloads the
+engine on the first tool call.
 
-## Status
+## Development
 
-**v0.1.0** (2026-05-30) — see [CHANGELOG](CHANGELOG.md). 56 Python tests + 1123 engine tests passing.
+```bash
+uv sync --extra dev
+uv run pytest -q
+uv run python scripts/build_brxt.py   # dist/codegraphagent.brxt, codegraphagent-<version>.brxt, SHA256SUMS
+```
 
-## Credits
+A release is cut by pushing a tag `v<manifest version>`; `.github/workflows/release-brxt.yml`
+refuses any other tag.
 
-Engine vendored from [CodeGraph](https://github.com/colbymchenry/codegraph)
-(MIT, © Colby McHenry). The full upstream license is preserved verbatim at
-`engine/LICENSE`. Per-file modifications are documented in
-[`engine/PATCHES.md`](engine/PATCHES.md).
+## Languages
 
-R / Julia / MATLAB / Perl extractors use tree-sitter grammars from
-[r-lib/tree-sitter-r](https://github.com/r-lib/tree-sitter-r),
-[tree-sitter/tree-sitter-julia](https://github.com/tree-sitter/tree-sitter-julia),
-[acristoffers/tree-sitter-matlab](https://github.com/acristoffers/tree-sitter-matlab),
-and [tree-sitter-perl/tree-sitter-perl](https://github.com/tree-sitter-perl/tree-sitter-perl)
-respectively.
+Up to 0.1.0 this repository vendored a fork of CodeGraph 0.9.7 with extra R, Julia, MATLAB and Perl
+extractors. Upstream has indexed R natively since 1.0.0. Julia, MATLAB and Perl are not indexed by
+1.6.4, so 0.2.0 no longer covers them.
+
+## License
+
+Apache-2.0 for this extension (see `LICENSE` and `NOTICE`). CodeGraph is MIT-licensed and is
+downloaded from its own release; no CodeGraph code is in this repository or in the bundle.

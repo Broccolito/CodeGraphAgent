@@ -1,8 +1,10 @@
 """Engine bootstrap — download + verify + extract on first use.
 
-The engine bundle is a per-platform tarball (or .zip on Windows) hosted on our
-own GitHub Releases. The release manifest pins both the version and per-platform
-SHA256s so a tampered or partial download is detected before we exec it.
+The engine bundle is upstream CodeGraph's own per-platform release archive
+(a tarball, or a .zip on Windows) from github.com/colbymchenry/codegraph. The
+release manifest pins the version and each archive's SHA-256 (copied from the
+release's SHA256SUMS), so a tampered or partial download is refused before it
+is ever run.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from pathlib import Path
 import urllib.error
 import urllib.request
 
+from codegraphagent import __version__
 from codegraphagent.errors import BootstrapError
 
 
@@ -54,7 +57,7 @@ def archive_suffix() -> str:
 
 def _sha256_of(path: Path) -> str:
     """Stream a file through SHA-256 in 64KB chunks. Memory-safe for large
-    tarballs (engine bundles are ~50 MB)."""
+    tarballs (engine bundles are about 60 MB)."""
     h = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(64 * 1024), b""):
@@ -71,14 +74,8 @@ def _load_manifest() -> dict:
     with manifest_path.open() as fh:
         manifest = json.load(fh)
 
-    version = os.environ.get("CODEGRAPH_ENGINE_VERSION") or manifest["engine_version"]
+    version = manifest["engine_version"]
     base_url = manifest["base_url"]
-    if os.environ.get("CODEGRAPH_ENGINE_VERSION"):
-        # Substitute the version in the URL to the override.
-        base_url = (
-            f"https://github.com/Broccolito/CodeGraphAgent/releases/"
-            f"download/engine-v{version}/"
-        )
 
     tag = platform_tag()
     if tag not in manifest["platforms"]:
@@ -99,15 +96,11 @@ def _download_and_verify(*, url: str, dest: Path, expected_sha: str) -> None:
     """Stream-download `url` to `dest`, verifying SHA-256 against
     `expected_sha`. On mismatch, removes the partial file and raises
     BootstrapError carrying both hashes.
-
-    A literal "PLACEHOLDER_FILLED_AT_RELEASE" expected_sha skips verification —
-    used only during local development before the first release is cut. The
-    bypass is logged.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "codegraphagent/0.1.0"},
+        headers={"User-Agent": f"codegraphagent/{__version__}"},
     )
     try:
         with urllib.request.urlopen(req, timeout=120.0) as resp:
@@ -139,14 +132,6 @@ def _download_and_verify(*, url: str, dest: Path, expected_sha: str) -> None:
             url=url,
         ) from exc
 
-    if expected_sha == "PLACEHOLDER_FILLED_AT_RELEASE":
-        import sys
-        print(
-            f"codegraphagent: skipping SHA verification (placeholder) for {url}",
-            file=sys.stderr,
-        )
-        return
-
     observed = _sha256_of(dest)
     if observed != expected_sha:
         dest.unlink(missing_ok=True)
@@ -172,9 +157,15 @@ def _extract(archive: Path, dest: Path) -> None:
         staging_path = Path(staging)
         if archive.name.endswith(".zip"):
             with zipfile.ZipFile(archive) as zf:
+                for member in zf.namelist():
+                    _check_member(staging_path, member)
                 zf.extractall(staging_path)
         else:
             with tarfile.open(archive, "r:*") as tf:
+                for member in tf.getmembers():
+                    _check_member(staging_path, member.name)
+                    if member.islnk() or (member.issym() and _escapes(staging_path, member.name, member.linkname)):
+                        raise BootstrapError(f"Engine archive has an unsafe link: {member.name}")
                 tf.extractall(staging_path)
 
         if dest.exists():
@@ -190,6 +181,20 @@ def _extract(archive: Path, dest: Path) -> None:
             shutil.rmtree(old_dest)
         else:
             staging_path.rename(dest)
+
+
+def _check_member(root: Path, name: str) -> None:
+    """Refuse an archive entry that would land outside ``root``."""
+    target = (root / name).resolve()
+    if target != root.resolve() and root.resolve() not in target.parents:
+        raise BootstrapError(f"Engine archive has an unsafe path: {name}")
+
+
+def _escapes(root: Path, name: str, linkname: str) -> bool:
+    """Whether a symlink at ``name`` pointing at ``linkname`` leaves ``root``."""
+    base = (root / name).parent
+    target = (base / linkname).resolve() if not Path(linkname).is_absolute() else Path(linkname).resolve()
+    return target != root.resolve() and root.resolve() not in target.parents
 
 
 def _install_dir() -> Path:

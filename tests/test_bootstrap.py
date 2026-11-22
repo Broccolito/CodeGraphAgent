@@ -63,13 +63,38 @@ def test_load_manifest_returns_pinned_info(monkeypatch: pytest.MonkeyPatch):
     assert info["url"].endswith("codegraph-linux-x64.tar.gz")
 
 
-def test_load_manifest_respects_engine_version_override(
-    monkeypatch: pytest.MonkeyPatch
-):
+def test_manifest_pins_upstream_v1_6_4_for_every_platform():
+    import json
+    manifest = json.loads((Path(bootstrap.__file__).parent / "release_manifest.json").read_text())
+    assert manifest["engine_version"] == "1.6.4"
+    assert manifest["base_url"] == "https://github.com/colbymchenry/codegraph/releases/download/v1.6.4/"
+    assert set(manifest["platforms"]) == {
+        "darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "win32-x64", "win32-arm64",
+    }
+    for info in manifest["platforms"].values():
+        assert len(info["sha256"]) == 64 and int(info["sha256"], 16) >= 0
+
+
+def test_engine_version_override_is_gone(monkeypatch: pytest.MonkeyPatch):
+    """An unpinned version cannot be verified, so the override was removed."""
     monkeypatch.setattr(bootstrap, "platform_tag", lambda: "linux-x64")
     monkeypatch.setenv("CODEGRAPH_ENGINE_VERSION", "0.9.9")
     info = bootstrap._load_manifest()
-    assert "engine-v0.9.9" in info["url"]
+    assert info["engine_version"] == "1.6.4"
+    assert "/v1.6.4/" in info["url"]
+
+
+def test_extract_refuses_a_path_outside_the_folder(tmp_path: Path):
+    import tarfile, io as _io
+    archive = tmp_path / "evil.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        data = b"x"
+        member = tarfile.TarInfo("../escape.txt")
+        member.size = len(data)
+        tf.addfile(member, _io.BytesIO(data))
+    with pytest.raises(BootstrapError):
+        bootstrap._extract(archive, tmp_path / "dest")
+    assert not (tmp_path / "escape.txt").exists()
 
 
 def test_download_and_verify_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

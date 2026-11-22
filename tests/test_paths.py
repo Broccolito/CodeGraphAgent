@@ -1,92 +1,100 @@
-"""paths.py — project root resolution and layout setup."""
+"""paths: project resolution, unsafe roots and the engine environment."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 
 from codegraphagent import paths
-from codegraphagent.errors import LayoutConflictError
 
 
-def test_resolve_project_root_uses_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("BIOROUTER_WORKING_DIR", str(tmp_path))
-    assert paths.resolve_project_root() == tmp_path.resolve()
+@pytest.fixture
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(paths.Path, "home", classmethod(lambda cls: home))
+    return home
 
 
-def test_resolve_project_root_falls_back_to_cwd_when_env_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.delenv("BIOROUTER_WORKING_DIR", raising=False)
-    monkeypatch.chdir(tmp_path)
-    assert paths.resolve_project_root() == tmp_path.resolve()
+def test_home_and_parents_and_root_are_unsafe(fake_home: Path):
+    assert paths.unsafe_root_reason(fake_home) == "your home folder"
+    assert paths.unsafe_root_reason(fake_home.parent) == "a folder above your home folder"
+    assert paths.unsafe_root_reason(Path("/")) == "the filesystem root"
 
 
-def test_resolve_project_root_walks_up_to_git_marker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    (tmp_path / ".git").mkdir()
-    nested = tmp_path / "a" / "b" / "c"
-    nested.mkdir(parents=True)
-    monkeypatch.delenv("BIOROUTER_WORKING_DIR", raising=False)
-    monkeypatch.chdir(nested)
-    assert paths.resolve_project_root() == tmp_path.resolve()
+def test_a_project_under_home_is_safe(fake_home: Path):
+    project = fake_home / "proj"
+    project.mkdir()
+    assert paths.unsafe_root_reason(project) is None
 
 
-def test_ensure_layout_creates_biorouter_codegraph_dir(tmp_project: Path):
-    paths.ensure_layout(tmp_project)
-    assert (tmp_project / ".biorouter" / "codegraph").is_dir()
+def test_fallback_unset_is_none(clean_env, fake_home: Path):
+    assert paths.fallback_project() is None
 
 
-def test_ensure_layout_creates_symlink(tmp_project: Path):
-    paths.ensure_layout(tmp_project)
-    link = tmp_project / ".codegraph"
-    assert link.is_symlink()
-    assert link.resolve() == (tmp_project / ".biorouter" / "codegraph").resolve()
+def test_fallback_is_working_dir_when_it_is_a_project(clean_env, fake_home: Path, monkeypatch):
+    project = fake_home / "proj"
+    project.mkdir()
+    monkeypatch.setenv("BIOROUTER_WORKING_DIR", str(project))
+    assert paths.fallback_project() == project.resolve()
 
 
-def test_ensure_layout_is_idempotent(tmp_project: Path):
-    paths.ensure_layout(tmp_project)
-    paths.ensure_layout(tmp_project)
-    link = tmp_project / ".codegraph"
-    assert link.is_symlink()
+def test_fallback_ignores_home(clean_env, fake_home: Path, monkeypatch):
+    monkeypatch.setenv("BIOROUTER_WORKING_DIR", str(fake_home))
+    assert paths.fallback_project() is None
 
 
-def test_ensure_layout_raises_on_real_codegraph_dir(tmp_project: Path):
-    (tmp_project / ".codegraph").mkdir()
-    with pytest.raises(LayoutConflictError) as excinfo:
-        paths.ensure_layout(tmp_project)
-    assert excinfo.value.path == str(tmp_project / ".codegraph")
+def test_fallback_ignores_a_missing_folder(clean_env, fake_home: Path, monkeypatch):
+    monkeypatch.setenv("BIOROUTER_WORKING_DIR", str(fake_home / "gone"))
+    assert paths.fallback_project() is None
 
 
-def test_ensure_layout_leaves_existing_symlink_alone(tmp_project: Path):
-    paths.ensure_layout(tmp_project)
-    link = tmp_project / ".codegraph"
-    mtime_before = link.lstat().st_mtime
-    paths.ensure_layout(tmp_project)
-    mtime_after = link.lstat().st_mtime
-    assert mtime_before == mtime_after
+def test_resolve_project_dir_absolute_and_tilde(clean_env, fake_home: Path, monkeypatch):
+    project = fake_home / "proj"
+    project.mkdir()
+    assert paths.resolve_project_dir(str(project)) == project.resolve()
+    monkeypatch.setattr(paths.Path, "expanduser", lambda self: Path(str(self).replace("~", str(fake_home), 1)))
+    assert paths.resolve_project_dir("~/proj") == project.resolve()
 
 
-def test_ensure_layout_writes_gitignore_for_codegraph_symlink(tmp_project: Path):
-    paths.ensure_layout(tmp_project)
-    content = (tmp_project / ".gitignore").read_text()
-    assert ".codegraph" in content
+def test_resolve_project_dir_relative_needs_a_fallback(clean_env, fake_home: Path, monkeypatch):
+    project = fake_home / "proj"
+    (project / "sub").mkdir(parents=True)
+    assert paths.resolve_project_dir("sub") is None
+    monkeypatch.setenv("BIOROUTER_WORKING_DIR", str(project))
+    assert paths.resolve_project_dir("sub") == (project / "sub").resolve()
 
 
-def test_ensure_layout_does_not_duplicate_gitignore_entry(tmp_project: Path):
-    paths.ensure_layout(tmp_project)
-    paths.ensure_layout(tmp_project)
-    content = (tmp_project / ".gitignore").read_text()
-    assert content.count(".codegraph") == 1
+def test_resolve_project_dir_rejects_non_strings():
+    assert paths.resolve_project_dir(None) is None
+    assert paths.resolve_project_dir("  ") is None
+    assert paths.resolve_project_dir(3) is None
 
 
-def test_ensure_layout_writes_state_dir_gitignore(tmp_project: Path):
-    paths.ensure_layout(tmp_project)
-    inner = tmp_project / ".biorouter" / "codegraph" / ".gitignore"
-    assert inner.exists()
-    content = inner.read_text()
-    for needle in ("*.db", "*.lock", ".dirty", "cache/"):
-        assert needle in content, f"missing {needle!r} in {content}"
+def test_engine_env_forces_telemetry_off_and_the_state_dir(clean_env):
+    env = paths.engine_env({"CODEGRAPH_TELEMETRY": "1", "CODEGRAPH_DIR": ".codegraph", "DO_NOT_TRACK": "0"})
+    assert env["CODEGRAPH_TELEMETRY"] == "0"
+    assert env["DO_NOT_TRACK"] == "1"
+    assert env["CODEGRAPH_NO_UPDATE_CHECK"] == "1"
+    assert env["CODEGRAPH_DIR"] == paths.STATE_DIR_NAME == ".codegraph-biorouter"
+    assert env["CODEGRAPH_MCP_TOOLS"] == "explore,node,search,callers"
+
+
+def test_engine_env_keeps_a_users_tool_list(clean_env):
+    env = paths.engine_env({"CODEGRAPH_MCP_TOOLS": "explore"})
+    assert env["CODEGRAPH_MCP_TOOLS"] == "explore"
+
+
+def test_state_dir_cannot_be_the_global_codegraph_folder():
+    # Upstream keeps its global state in ~/.codegraph; the index folder must
+    # never share that name, even for a project at the home folder.
+    assert paths.STATE_DIR_NAME != ".codegraph"
+    assert paths.STATE_DIR_NAME.startswith(".codegraph-")
+
+
+def test_run_dir_is_an_empty_existing_folder():
+    run = paths.run_dir()
+    assert run.is_dir()
